@@ -4,16 +4,23 @@ query EpisodesQuery($id: ID!) {
       nodes {
         id
         title
+        description
+        duration
+        publishDate
+        summary
 
         image {
           url
+          url1X1
         }
 
         programSet {
           id
           path
+          title
         }
         audios {
+          url
           downloadUrl
         }
       }
