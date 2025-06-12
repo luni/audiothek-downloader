@@ -1,20 +1,23 @@
 import argparse
 import json
+import logging
 import os
 import re
 import sys
 
 import requests
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]%(message)s")
 
-def main(url: str, folder: str):
+
+def main(url: str, folder: str) -> None:
     match = re.search(r"/(\d+)/?$", url)
     if match:
         id = match.group(1)
         downloadEpisodes(id, folder)
 
 
-def downloadEpisodes(id: str, folder: str):
+def downloadEpisodes(id: str, folder: str) -> None:
     query = open(
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
@@ -67,9 +70,7 @@ def downloadEpisodes(id: str, folder: str):
         image_url_x1 = image_url_x1.replace("{width}", "2000")
         if not node.get("audios"):
             continue
-        mp3_url = node.get("audios")[0].get("downloadUrl") or node.get("audios")[0].get(
-            "url"
-        )
+        mp3_url = node.get("audios")[0].get("downloadUrl") or node.get("audios")[0].get("url")
         programset_id = node.get("programSet").get("id")
 
         program_path: str = os.path.join(folder, programset_id)
@@ -81,17 +82,15 @@ def downloadEpisodes(id: str, folder: str):
             except FileExistsError:
                 pass
             except Exception as e:
-                print("[Error] Couldn't create output directory!", file=sys.stderr)
-                print(e, file=sys.stderr)
+                logging.error("[Error] Couldn't create output directory!")
+                logging.exception(e)
                 return
 
             # write images
             image_file_path = os.path.join(program_path, filename + ".jpg")
             image_file_x1_path = os.path.join(program_path, filename + "_x1.jpg")
 
-            if not os.path.exists(image_file_path) or not os.path.exists(
-                image_file_x1_path
-            ):
+            if not os.path.exists(image_file_path) or not os.path.exists(image_file_x1_path):
                 response_image = requests.get(image_url)
                 with open(image_file_path, "wb") as f:
                     f.write(response_image.content)
@@ -104,14 +103,7 @@ def downloadEpisodes(id: str, folder: str):
             # write mp3
             mp3_file_path = os.path.join(program_path, filename + ".mp3")
 
-            print(
-                "Download: "
-                + str(index + 1)
-                + " of "
-                + str(len(nodes))
-                + " -> "
-                + mp3_file_path
-            )
+            logging.info("Download: %s of %s -> %s", index + 1, len(nodes), mp3_file_path)
             if os.path.exists(mp3_file_path) == False and mp3_url:
                 response_mp3 = requests.get(mp3_url)
                 with open(mp3_file_path, "wb") as f:
@@ -136,7 +128,7 @@ def downloadEpisodes(id: str, folder: str):
             with open(meta_file_path, "w") as f:
                 json.dump(data, f, indent=4)
         else:
-            print("No programset_id found!", file=sys.stderr)
+            logging.error("No programset_id found!")
 
 
 if __name__ == "__main__":
@@ -149,9 +141,7 @@ if __name__ == "__main__":
         required=True,
         help="Insert audiothek url (e.g. https://www.ardaudiothek.de/sendung/2035-die-zukunft-beginnt-jetzt-scifi-mit-niklas-kolorz/12121989/)",
     )
-    parser.add_argument(
-        "--folder", "-f", type=str, default="./output", help="Folder to save all mp3s"
-    )
+    parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
 
     args = parser.parse_args()
     url = args.url
