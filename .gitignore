@@ -1,9 +1,14 @@
-/output
-.vscode/
-.DS_Store
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+/.pytest_cache/
+*.egg-info
 /.ruff_cache/
 /.venv/
-*.pyc
-/__pycache__/
+
+.vscode/
+.DS_Store
 /.coverage
-/.pytest_cache/

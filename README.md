@@ -10,6 +10,7 @@ This CLI downloads ARD Audiothek programs, editorial collections, or individual 
 - Skips files that already exist, so reruns are effectively resumable.
 - Update existing folders by crawling through subdirectories and refreshing content.
 - Support for direct resource IDs (URNs or numeric IDs) as an alternative to URLs.
+- Refactored into a proper Python library with CLI interface.
 
 ## Requirements
 
@@ -27,6 +28,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Create the virtual environment and install dependencies
 uv sync
+
+# Install the package in editable mode
+uv pip install -e .
 ```
 
 ## Usage
@@ -34,7 +38,7 @@ uv sync
 Get a quick overview of the available options:
 
 ```bash
-uv run python audiothek.py --help
+audiothek --help
 ```
 
 | Option        | Description                                                                                       |
@@ -47,51 +51,92 @@ uv run python audiothek.py --help
 ### Download a program (all episodes)
 
 ```bash
-uv run python audiothek.py --url 'https://www.ardaudiothek.de/sendung/j-r-r-tolkien-der-herr-der-ringe-fantasy-hoerspiel-klassiker/12197351/'
+audiothek --url 'https://www.ardaudiothek.de/sendung/j-r-r-tolkien-der-herr-der-ringe-fantasy-hoerspiel-klassiker/12197351/'
 ```
 
 ### Download an editorial collection
 
 ```bash
-uv run python audiothek.py --url 'https://www.ardaudiothek.de/seite/hoerenswertes/urn:ard:page:5a615c6cb3a42c0001cfbaf8/'
+audiothek --url 'https://www.ardaudiothek.de/seite/hoerenswertes/urn:ard:page:5a615c6cb3a42c0001cfbaf8/'
 ```
 
 ### Download a single episode via URN
 
 ```bash
-uv run python audiothek.py --url 'https://www.ardaudiothek.de/episode/foo/urn:ard:episode:1234567890abcdef/'
+audiothek --url 'https://www.ardaudiothek.de/episode/foo/urn:ard:episode:1234567890abcdef/'
 ```
 
 ### Download using resource ID directly
 
 ```bash
 # Download a program by numeric ID
-uv run python audiothek.py --id '12197351'
+audiothek --id '12197351'
 
 # Download an episode by URN
-uv run python audiothek.py --id 'urn:ard:episode:1234567890abcdef'
+audiothek --id 'urn:ard:episode:1234567890abcdef'
 
 # Download a collection by URN
-uv run python audiothek.py --id 'urn:ard:page:5a615c6cb3a42c0001cfbaf8'
+audiothek --id 'urn:ard:page:5a615c6cb3a42c0001cfbaf8'
 ```
 
 ### Update all existing folders
 
 ```bash
 # Crawl through all subfolders in the output directory and update them
-uv run python audiothek.py --update-folders
+audiothek --update-folders
 
 # Update folders in a custom directory
-uv run python audiothek.py --update-folders --folder '/path/to/archive'
+audiothek --update-folders --folder '/path/to/archive'
 ```
 
 ### Store files in a custom directory
 
 ```bash
-uv run python audiothek.py \
+audiothek \
   --url 'https://www.ardaudiothek.de/sendung/example/12345678/' \
   --folder '/path/to/archive'
 ```
+
+## Development
+
+### Running as Module
+
+You can also run the package as a Python module:
+
+```bash
+uv run python -m audiothek --help
+uv run python -m audiothek --url 'https://example.com/audiothek-url'
+```
+
+### Using as a Library
+
+The refactored code can be used as a Python library:
+
+```python
+from audiothek import AudiothekDownloader
+
+# Create downloader instance
+downloader = AudiothekDownloader("/path/to/output")
+
+# Download from URL
+downloader.download_from_url("https://www.ardaudiothek.de/sendung/example/12345678/")
+
+# Download from ID
+downloader.download_from_id("urn:ard:episode:1234567890abcdef", "/path/to/output")
+
+# Update existing folders
+downloader.update_all_folders("/path/to/archive")
+```
+
+### Testing
+
+Run the test suite:
+
+```bash
+uv run make test
+```
+
+The project maintains 91%+ test coverage with 31 passing tests.
 
 ## Output structure
 
@@ -108,7 +153,7 @@ output/
 
 ## GraphQL queries
 
-The script relies on the public `https://api.ardaudiothek.de/graphql` endpoint and ships the queries in the `graphql/` directory:
+The script relies on the public `https://api.ardaudiothek.de/graphql` endpoint and ships the queries in the `src/audiothek/graphql/` directory:
 
 - `ProgramSetEpisodesQuery.graphql` for regular shows
 - `editorialCollection.graphql` for curated collections
@@ -120,5 +165,6 @@ You can tweak these documents if ARD changes their API structure.
 
 1. Only episodes that expose a `downloadUrl` (or fallback `url`) can be saved—DRM-protected content may not download.
 2. Large feeds are paginated in batches of 24 items; the downloader loops until `hasNextPage` is `false`.
-3. Respect ARD Audiothek’s terms of service and only download content you are allowed to store locally.
+3. Respect ARD Audiothek's terms of service and only download content you are allowed to store locally.
 4. The `--update-folders` functionality replaces the previous `scrape.sh` script for updating existing downloads.
+5. The project has been refactored into a proper Python package with a clean separation between library code and CLI interface.

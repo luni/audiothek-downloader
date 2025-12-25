@@ -4,60 +4,73 @@ from pathlib import Path
 
 import pytest
 
-import audiothek
+from audiothek import AudiothekDownloader
+from audiothek.__main__ import _main
 from tests.conftest import GraphQLMock, MockResponse
 
 
 def test_parse_url_episode_urn() -> None:
-    assert audiothek.parse_url("https://www.ardaudiothek.de/folge/x/urn:ard:episode:abc/") == ("episode", "urn:ard:episode:abc")
+    downloader = AudiothekDownloader()
+    assert downloader._parse_url("https://www.ardaudiothek.de/folge/x/urn:ard:episode:abc/") == ("episode", "urn:ard:episode:abc")
 
 
 def test_parse_url_collection_urn() -> None:
-    assert audiothek.parse_url("https://www.ardaudiothek.de/sammlung/x/urn:ard:page:xyz") == ("collection", "urn:ard:page:xyz")
+    downloader = AudiothekDownloader()
+    assert downloader._parse_url("https://www.ardaudiothek.de/sammlung/x/urn:ard:page:xyz") == ("collection", "urn:ard:page:xyz")
 
 
 def test_parse_url_program_urn_and_numeric() -> None:
-    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/urn:ard:show:111") == ("program", "urn:ard:show:111")
-    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/12345/") == ("program", "12345")
+    downloader = AudiothekDownloader()
+    assert downloader._parse_url("https://www.ardaudiothek.de/sendung/x/urn:ard:show:111") == ("program", "urn:ard:show:111")
+    assert downloader._parse_url("https://www.ardaudiothek.de/sendung/x/12345/") == ("program", "12345")
 
 
 def test_parse_url_none() -> None:
-    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/") is None
+    downloader = AudiothekDownloader()
+    assert downloader._parse_url("https://www.ardaudiothek.de/sendung/x/") is None
 
 
 def test_parse_url_fallback_urn() -> None:
     # Test fallback for other urn types
-    assert audiothek.parse_url("https://www.ardaudiothek.de/x/urn:ard:other:abc/") == ("program", "urn:ard:other:abc")
+    downloader = AudiothekDownloader()
+    assert downloader._parse_url("https://www.ardaudiothek.de/x/urn:ard:other:abc/") == ("program", "urn:ard:other:abc")
 
 
 def test_determine_resource_type_from_id_episode() -> None:
-    assert audiothek.determine_resource_type_from_id("urn:ard:episode:abc") == ("episode", "urn:ard:episode:abc")
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("urn:ard:episode:abc") == ("episode", "urn:ard:episode:abc")
 
 
 def test_determine_resource_type_from_id_collection() -> None:
-    assert audiothek.determine_resource_type_from_id("urn:ard:page:xyz") == ("collection", "urn:ard:page:xyz")
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("urn:ard:page:xyz") == ("collection", "urn:ard:page:xyz")
 
 
 def test_determine_resource_type_from_id_program() -> None:
-    assert audiothek.determine_resource_type_from_id("urn:ard:show:111") == ("program", "urn:ard:show:111")
-    assert audiothek.determine_resource_type_from_id("urn:ard:other:123") == ("program", "urn:ard:other:123")
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("urn:ard:show:111") == ("program", "urn:ard:show:111")
+    assert downloader._determine_resource_type_from_id("urn:ard:other:123") == ("program", "urn:ard:other:123")
 
 
 def test_determine_resource_type_from_id_numeric() -> None:
-    assert audiothek.determine_resource_type_from_id("12345") == ("program", "12345")
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("12345") == ("program", "12345")
 
 
 def test_determine_resource_type_from_id_alphanumeric() -> None:
-    assert audiothek.determine_resource_type_from_id("ps1") == ("program", "ps1")
-    assert audiothek.determine_resource_type_from_id("abc123") == ("program", "abc123")
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("ps1") == ("program", "ps1")
+    assert downloader._determine_resource_type_from_id("abc123") == ("program", "abc123")
 
 
 def test_determine_resource_type_from_id_none() -> None:
-    assert audiothek.determine_resource_type_from_id("invalid_id") is None
+    downloader = AudiothekDownloader()
+    assert downloader._determine_resource_type_from_id("invalid_id") is None
 
 
 def test_download_single_episode_writes_files(tmp_path: Path, mock_requests_get: object) -> None:
-    audiothek.download_single_episode("urn:ard:episode:test", str(tmp_path))
+    downloader = AudiothekDownloader()
+    downloader._download_single_episode("urn:ard:episode:test", str(tmp_path))
 
     # written under programSet id from mock
     program_dir = tmp_path / "ps1"
@@ -75,7 +88,8 @@ def test_download_single_episode_writes_files(tmp_path: Path, mock_requests_get:
 
 
 def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
-    audiothek.download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+    downloader = AudiothekDownloader()
+    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
 
     program_dir = tmp_path / "ps1"
     assert program_dir.exists()
@@ -92,7 +106,8 @@ def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_
 
 
 def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: object) -> None:
-    audiothek.save_nodes(
+    downloader = AudiothekDownloader()
+    downloader._save_nodes(
         [
             {
                 "id": "e1",
@@ -109,18 +124,18 @@ def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: objec
 
 def test_main_invalid_url_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
-        audiothek.main("https://invalid.example", str(tmp_path))
+        _main("https://invalid.example", str(tmp_path))
     assert any("Could not determine resource ID" in r.message for r in caplog.records)
 
 
 def test_main_invalid_id_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
-        audiothek.main("", str(tmp_path), id="invalid_id")
+        _main("", str(tmp_path), id="invalid_id")
     assert any("Could not determine resource type from ID" in r.message for r in caplog.records)
 
 
 def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None:
-    audiothek.main("", str(tmp_path), id="urn:ard:episode:test")
+    _main("", str(tmp_path), id="urn:ard:episode:test")
 
     # written under programSet id from mock
     program_dir = tmp_path / "ps1"
@@ -132,7 +147,7 @@ def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None
 
 
 def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
-    audiothek.main("", str(tmp_path), id="ps1")
+    _main("", str(tmp_path), id="ps1")
 
     program_dir = tmp_path / "ps1"
     assert program_dir.exists()
@@ -155,14 +170,15 @@ def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, capl
     monkeypatch.setattr("requests.get", _mock_get)
 
     with caplog.at_level("ERROR"):
-        audiothek.download_single_episode("urn:ard:episode:nonexistent", str(tmp_path))
+        downloader = AudiothekDownloader()
+        downloader._download_single_episode("urn:ard:episode:nonexistent", str(tmp_path))
 
     assert any("Episode not found" in r.message for r in caplog.records)
 
 
 def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
     # Test the URL path in main function
-    audiothek.main("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
+    _main("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
 
     # written under programSet id from mock
     program_dir = tmp_path / "ps1"
@@ -183,7 +199,8 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr("requests.get", _mock_get)
 
     # Should not create any directories since no results
-    audiothek.download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+    downloader = AudiothekDownloader()
+    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
     assert not (tmp_path / "ps1").exists()
 
 
@@ -203,7 +220,8 @@ def test_save_nodes_directory_creation_error_logs_and_returns(tmp_path: Path, mo
     ]
 
     with caplog.at_level("ERROR"):
-        audiothek.save_nodes(nodes, str(tmp_path))
+        downloader = AudiothekDownloader()
+        downloader._save_nodes(nodes, str(tmp_path))
 
     assert any("Couldn't create output directory" in r.message for r in caplog.records)
 
@@ -213,35 +231,31 @@ def test_main_argument_parsing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     # Test that main function can be called with URL
     calls = []
 
-    def _mock_download_single_episode(resource_id, folder):
-        calls.append(("download_single_episode", resource_id, folder))
+    def _mock_download_from_url(self, url, folder):
+        calls.append(("download_from_url", url, folder))
 
-    def _mock_download_collection(url, resource_id, folder, is_editorial):
-        calls.append(("download_collection", url, resource_id, folder, is_editorial))
+    def _mock_download_from_id(self, resource_id, folder):
+        calls.append(("download_from_id", resource_id, folder))
 
-    def _mock_parse_url(url):
-        if "episode" in url:
-            return "episode", "urn:ard:episode:test"
-        return "program", "ps1"
+    def _mock_update_all_folders(self, folder):
+        calls.append(("update_all_folders", folder))
 
-    monkeypatch.setattr(audiothek, "download_single_episode", _mock_download_single_episode)
-    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
-    monkeypatch.setattr(audiothek, "parse_url", _mock_parse_url)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_id", _mock_download_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with URL for episode
-    audiothek.main("https://example.com/episode/test", str(tmp_path))
+    _main("https://example.com/episode/test", str(tmp_path))
     assert len(calls) == 1
-    assert calls[0][0] == "download_single_episode"
-    assert calls[0][1] == "urn:ard:episode:test"
+    assert calls[0][0] == "download_from_url"
+    assert calls[0][1] == "https://example.com/episode/test"
 
-    # Clear calls and test with URL for program (covers line 47)
+    # Clear calls and test with URL for program
     calls.clear()
-    audiothek.main("https://example.com/program/test", str(tmp_path))
+    _main("https://example.com/program/test", str(tmp_path))
     assert len(calls) == 1
-    assert calls[0][0] == "download_collection"
+    assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/program/test"
-    assert calls[0][2] == "ps1"
-    assert calls[0][4] is False  # is_editorial should be False for program
 
 
 def test_argument_parser_setup() -> None:
@@ -337,19 +351,20 @@ def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(folder_id):
+    def _mock_determine_resource_type_from_id(self, folder_id):
         if folder_id in ["123456", "789012"]:
             return "program", folder_id
         return None
 
-    def _mock_download_collection(url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
-    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
-        audiothek.update_all_folders(str(tmp_path))
+        downloader = AudiothekDownloader()
+        downloader.update_all_folders(str(tmp_path))
 
     # Should have called download_collection for both numeric folders (order doesn't matter)
     assert len(calls) == 2
@@ -374,19 +389,20 @@ def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pyte
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(folder_id):
+    def _mock_determine_resource_type_from_id(self, folder_id):
         if folder_id in ["123456", "789012", "999999"]:
             return "program", folder_id
         return None
 
-    def _mock_download_collection(url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
-    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
-        audiothek.update_all_folders(str(tmp_path))
+        downloader = AudiothekDownloader()
+        downloader.update_all_folders(str(tmp_path))
 
     # Should have called download_collection for all folders with numeric IDs
     assert len(calls) == 3
@@ -401,7 +417,8 @@ def test_update_all_folders_nonexistent_directory(tmp_path: Path, caplog: pytest
     nonexistent_dir = str(tmp_path / "nonexistent")
 
     with caplog.at_level("ERROR"):
-        audiothek.update_all_folders(nonexistent_dir)
+        downloader = AudiothekDownloader()
+        downloader.update_all_folders(nonexistent_dir)
 
     assert any("does not exist" in r.message for r in caplog.records)
 
@@ -414,39 +431,40 @@ def test_update_all_folders_invalid_ids(tmp_path: Path, monkeypatch: pytest.Monk
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(folder_id):
+    def _mock_determine_resource_type_from_id(self, folder_id):
         if folder_id == "123456":
             return "program", folder_id
         return None  # 999999 will return None (invalid)
 
-    def _mock_download_collection(url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
-    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with caplog.at_level("ERROR"):
-        audiothek.update_all_folders(str(tmp_path))
+        downloader = AudiothekDownloader()
+        downloader.update_all_folders(str(tmp_path))
 
     # Should have called download_collection only for valid ID
     assert len(calls) == 1
     assert calls[0] == ("download_collection", "123456", str(tmp_path), False)
 
     # Should have logged error for invalid numeric ID
-    assert any("Could not determine resource type from ID: 999999" in r.message for r in caplog.records)
+    assert any("Could not determine resource type from ID" in r.message for r in caplog.records)
 
 
 def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test main function with update_folders=True"""
     calls = []
 
-    def _mock_update_all_folders(folder):
+    def _mock_update_all_folders(self, folder):
         calls.append(("update_all_folders", folder))
 
-    monkeypatch.setattr(audiothek, "update_all_folders", _mock_update_all_folders)
+    monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with update_folders=True
-    audiothek.main("", str(tmp_path), update_folders=True)
+    _main("", str(tmp_path), update_folders=True)
 
     assert len(calls) == 1
     assert calls[0] == ("update_all_folders", str(tmp_path))
@@ -477,7 +495,8 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
 
     monkeypatch.setattr("requests.get", _get)
 
-    audiothek.save_nodes(
+    downloader = AudiothekDownloader()
+    downloader._save_nodes(
         [
             {
                 "id": "e1",

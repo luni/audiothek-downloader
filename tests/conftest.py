@@ -99,7 +99,7 @@ class GraphQLMock:
 @pytest.fixture(scope="session")
 def graphql_schema() -> GraphQLSchema:
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    schema_path = os.path.join(base_dir, "graphql", "schema.graphql")
+    schema_path = os.path.join(base_dir, "src", "audiothek", "graphql", "schema.graphql")
     with open(schema_path) as f:
         sdl = f.read()
     return build_schema(sdl)

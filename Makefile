@@ -13,7 +13,7 @@ reformat-ruff:
 	ruff format .
 
 update-graphql-schema:
-	npx get-graphql-schema https://api.ardaudiothek.de/graphql > graphql/schema.graphql
+	npx get-graphql-schema https://api.ardaudiothek.de/graphql > src/audiothek/graphql/schema.graphql
 
 # Check the code using ruff
 check:
