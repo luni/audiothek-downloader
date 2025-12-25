@@ -349,6 +349,7 @@ class AudiothekDownloader:
             query = f.read()
 
         nodes: list[dict] = []
+        collection_data: dict | None = None
         offset = 0
         count = 24
         while True:
@@ -364,6 +365,39 @@ class AudiothekDownloader:
             if not results:
                 break
 
+            # Store collection data for editorial collections and program sets (only on first iteration)
+            if collection_data is None:
+                if is_editorial_collection:
+                    collection_data = {
+                        "id": results.get("id"),
+                        "coreId": results.get("coreId"),
+                        "title": results.get("title"),
+                        "synopsis": results.get("synopsis"),
+                        "summary": results.get("summary"),
+                        "editorialDescription": results.get("editorialDescription"),
+                        "image": results.get("image"),
+                        "sharingUrl": results.get("sharingUrl"),
+                        "path": results.get("path"),
+                        "numberOfElements": results.get("numberOfElements"),
+                        "broadcastDuration": results.get("broadcastDuration"),
+                    }
+                else:
+                    # Program set metadata
+                    collection_data = {
+                        "id": results.get("id"),
+                        "coreId": results.get("coreId"),
+                        "title": results.get("title"),
+                        "synopsis": results.get("synopsis"),
+                        "numberOfElements": results.get("numberOfElements"),
+                        "image": results.get("image"),
+                        "editorialCategoryId": results.get("editorialCategoryId"),
+                        "imageCollectionId": results.get("imageCollectionId"),
+                        "publicationServiceId": results.get("publicationServiceId"),
+                        "coreDocument": results.get("coreDocument"),
+                        "rowId": results.get("rowId"),
+                        "nodeId": results.get("nodeId"),
+                    }
+
             items = results.get("items", {}) or {}
             page_nodes = items.get("nodes", []) or []
             if isinstance(page_nodes, list):
@@ -375,6 +409,40 @@ class AudiothekDownloader:
             offset += count
 
         self._save_nodes(nodes, folder)
+
+        # Save collection metadata as <id>.json in the output folder
+        if collection_data:
+            self._save_collection_data(collection_data, folder, is_editorial_collection)
+
+    def _save_collection_data(self, collection_data: dict, folder: str, is_editorial_collection: bool) -> None:
+        """Save collection metadata as <id>.json in the output folder.
+
+        Args:
+            collection_data: The collection metadata dictionary
+            folder: The output directory to save the JSON file
+            is_editorial_collection: Whether this is an editorial collection (True) or program set (False)
+
+        """
+        collection_id = collection_data.get("id") or ("collection" if is_editorial_collection else "program_set")
+
+        # Create the output folder if it doesn't exist
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except Exception as e:
+            self.logger.error("Couldn't create output directory %s: %s", folder, e)
+            return
+
+        # Save the collection data as <id>.json
+        collection_file_path = os.path.join(folder, f"{collection_id}.json")
+
+        try:
+            with open(collection_file_path, "w") as f:
+                json.dump(collection_data, f, indent=4)
+            collection_type = "editorial collection" if is_editorial_collection else "program set"
+            self.logger.info("Saved %s data: %s", collection_type, collection_file_path)
+        except Exception as e:
+            collection_type = "editorial collection" if is_editorial_collection else "program set"
+            self.logger.error("Error saving %s data: %s", collection_type, e)
 
     def _save_nodes(self, nodes: list[dict[str, Any]], folder: str) -> None:
         """Write episode assets (cover, audio, metadata) to disk."""

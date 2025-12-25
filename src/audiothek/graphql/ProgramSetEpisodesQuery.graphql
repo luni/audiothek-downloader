@@ -1,5 +1,20 @@
 query ProgramSetEpisodesQuery($id: ID!, $offset: Int!, $count: Int!) {
   result: programSet(id: $id) {
+    id
+    coreId
+    title
+    synopsis
+    numberOfElements
+    image {
+      url
+      url1X1
+    }
+    editorialCategoryId
+    imageCollectionId
+    publicationServiceId
+    coreDocument
+    rowId
+    nodeId
     items(
       offset: $offset
       first: $count

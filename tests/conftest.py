@@ -87,9 +87,38 @@ class GraphQLMock:
 
             result_container: dict[str, Any]
             if operation_name == "ProgramSetEpisodesQuery":
-                result_container = {"items": {"pageInfo": {"hasNextPage": has_next, "endCursor": ""}, "nodes": nodes}}
+                # Include program set metadata
+                result_container = {
+                    "id": "ps1",
+                    "coreId": "core_ps1",
+                    "title": "Test Program Set",
+                    "synopsis": "Test program set synopsis",
+                    "numberOfElements": 4,
+                    "image": {"url": "https://cdn.test/program_{width}.jpg", "url1X1": "https://cdn.test/program1x1_{width}.jpg"},
+                    "editorialCategoryId": "cat123",
+                    "imageCollectionId": "img123",
+                    "publicationServiceId": 1,
+                    "coreDocument": {"key": "value"},
+                    "rowId": 1,
+                    "nodeId": "node_ps1",
+                    "items": {"pageInfo": {"hasNextPage": has_next, "endCursor": ""}, "nodes": nodes}
+                }
             else:
-                result_container = {"items": {"pageInfo": {"hasNextPage": has_next}, "nodes": nodes}}
+                # Include editorial collection metadata
+                result_container = {
+                    "id": "ec1",
+                    "coreId": "core_ec1",
+                    "title": "Test Editorial Collection",
+                    "synopsis": "Test editorial collection synopsis",
+                    "summary": "Test editorial collection summary",
+                    "editorialDescription": "Test editorial description",
+                    "image": {"url": "https://cdn.test/collection_{width}.jpg", "url1X1": "https://cdn.test/collection1x1_{width}.jpg"},
+                    "sharingUrl": "https://example.com/share/ec1",
+                    "path": "/collection/ec1",
+                    "numberOfElements": 4,
+                    "broadcastDuration": 3600,
+                    "items": {"pageInfo": {"hasNextPage": has_next}, "nodes": nodes}
+                }
 
             return {"data": {"result": result_container}}
 

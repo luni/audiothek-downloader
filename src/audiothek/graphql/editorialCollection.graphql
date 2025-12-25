@@ -1,5 +1,19 @@
 query EpisodesQuery($id: ID!, $offset: Int!, $count: Int!) {
   result: editorialCollection(id: $id, offset: $offset, limit: $count) {
+    id
+    coreId
+    title
+    synopsis
+    summary
+    editorialDescription
+    image {
+      url
+      url1X1
+    }
+    sharingUrl
+    path
+    numberOfElements
+    broadcastDuration
     items {
       pageInfo {
         hasNextPage

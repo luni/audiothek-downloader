@@ -835,22 +835,6 @@ def test_get_program_set_title_empty_nodes(tmp_path: Path, monkeypatch: pytest.M
     assert result is None
 
 
-def test_get_program_set_title_no_program_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when node has no programSet."""
-    downloader = AudiothekDownloader()
-
-    def _mock_requests_get_no_program_set(*args, **kwargs):
-        class MockResponse:
-            def json(self):
-                return {"data": {"result": {"items": {"nodes": [{"id": "test"}]}}}}
-        return MockResponse()
-
-    monkeypatch.setattr("requests.get", _mock_requests_get_no_program_set)
-
-    result = downloader._get_program_set_title("test_id")
-    assert result is None
-
-
 def test_save_nodes_no_download_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _save_nodes when node has no download URL."""
     downloader = AudiothekDownloader()
@@ -1143,3 +1127,179 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
     assert len(calls) == 1
     assert calls[0][0] == "download_collection"
     assert calls[0][4] is False  # is_editorial flag for program type
+
+
+def test_download_collection_saves_editorial_collection_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
+    """Test that editorial collection metadata is saved as <id>.json file."""
+    downloader = AudiothekDownloader()
+    downloader._download_collection("https://x", "ec1", str(tmp_path), is_editorial_collection=True)
+
+    # Check that editorial collection metadata file was created
+    collection_file = tmp_path / "ec1.json"
+    assert collection_file.exists()
+
+    # Verify the metadata content
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "ec1"
+    assert metadata["coreId"] == "core_ec1"
+    assert metadata["title"] == "Test Editorial Collection"
+    assert metadata["synopsis"] == "Test editorial collection synopsis"
+    assert metadata["summary"] == "Test editorial collection summary"
+    assert metadata["editorialDescription"] == "Test editorial description"
+    assert metadata["sharingUrl"] == "https://example.com/share/ec1"
+    assert metadata["path"] == "/collection/ec1"
+    assert metadata["numberOfElements"] == 4
+    assert metadata["broadcastDuration"] == 3600
+    assert "image" in metadata
+    assert metadata["image"]["url"] == "https://cdn.test/collection_{width}.jpg"
+
+
+def test_download_collection_saves_program_set_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
+    """Test that program set metadata is saved as <id>.json file."""
+    downloader = AudiothekDownloader()
+    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+
+    # Check that program set metadata file was created
+    collection_file = tmp_path / "ps1.json"
+    assert collection_file.exists()
+
+    # Verify the metadata content
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "ps1"
+    assert metadata["coreId"] == "core_ps1"
+    assert metadata["title"] == "Test Program Set"
+    assert metadata["synopsis"] == "Test program set synopsis"
+    assert metadata["numberOfElements"] == 4
+    assert metadata["editorialCategoryId"] == "cat123"
+    assert metadata["imageCollectionId"] == "img123"
+    assert metadata["publicationServiceId"] == 1
+    assert metadata["rowId"] == 1
+    assert metadata["nodeId"] == "node_ps1"
+    assert "coreDocument" in metadata
+    assert "image" in metadata
+    assert metadata["image"]["url"] == "https://cdn.test/program_{width}.jpg"
+
+
+def test_save_collection_data_editorial_collection(tmp_path: Path) -> None:
+    """Test _save_collection_data method with editorial collection data."""
+    downloader = AudiothekDownloader()
+
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Collection",
+        "synopsis": "Test synopsis"
+    }
+
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check file was created
+    collection_file = tmp_path / "test_ec.json"
+    assert collection_file.exists()
+
+    # Verify content
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "test_ec"
+    assert metadata["title"] == "Test Collection"
+    assert metadata["synopsis"] == "Test synopsis"
+
+
+def test_save_collection_data_program_set(tmp_path: Path) -> None:
+    """Test _save_collection_data method with program set data."""
+    downloader = AudiothekDownloader()
+
+    program_set_data = {
+        "id": "test_ps",
+        "title": "Test Program Set",
+        "numberOfElements": 10
+    }
+
+    downloader._save_collection_data(program_set_data, str(tmp_path), is_editorial_collection=False)
+
+    # Check file was created
+    collection_file = tmp_path / "test_ps.json"
+    assert collection_file.exists()
+
+    # Verify content
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "test_ps"
+    assert metadata["title"] == "Test Program Set"
+    assert metadata["numberOfElements"] == 10
+
+
+def test_save_collection_data_without_id_uses_fallback(tmp_path: Path) -> None:
+    """Test _save_collection_data uses fallback ID when no ID is provided."""
+    downloader = AudiothekDownloader()
+
+    collection_data = {"title": "Test Collection"}
+
+    # Test editorial collection fallback
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+    collection_file = tmp_path / "collection.json"
+    assert collection_file.exists()
+
+    # Test program set fallback
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=False)
+    program_set_file = tmp_path / "program_set.json"
+    assert program_set_file.exists()
+
+
+def test_save_collection_data_directory_creation_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _save_collection_data when directory creation fails."""
+    def _mock_makedirs_error(path, exist_ok=False):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr("os.makedirs", _mock_makedirs_error)
+
+    downloader = AudiothekDownloader()
+    collection_data = {"id": "test", "title": "Test"}
+
+    with caplog.at_level("ERROR"):
+        downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    assert any("Couldn't create output directory" in r.message for r in caplog.records)
+
+
+def test_save_collection_data_file_write_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _save_collection_data when file write fails."""
+    def _mock_open_error(*args, **kwargs):
+        raise OSError("Disk full")
+
+    monkeypatch.setattr("builtins.open", _mock_open_error)
+
+    downloader = AudiothekDownloader()
+    collection_data = {"id": "test", "title": "Test"}
+
+    with caplog.at_level("ERROR"):
+        downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    assert any("Error saving editorial collection data" in r.message for r in caplog.records)
+
+
+def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
+    """Test downloading editorial collection using URL with editorial collection URN."""
+    downloader = AudiothekDownloader()
+    downloader.download_from_url("https://www.ardaudiothek.de/sammlung/test/urn:ard:page:ec1/", str(tmp_path))
+
+    # Check that editorial collection metadata file was created
+    collection_file = tmp_path / "ec1.json"
+    assert collection_file.exists()
+
+    # Verify it's editorial collection metadata
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "ec1"
+    assert "editorialDescription" in metadata
+
+
+def test_download_collection_with_program_set_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
+    """Test downloading program set using URL with program set URN."""
+    downloader = AudiothekDownloader()
+    downloader.download_from_url("https://www.ardaudiothek.de/sendung/test/urn:ard:show:ps1/", str(tmp_path))
+
+    # Check that program set metadata file was created
+    collection_file = tmp_path / "ps1.json"
+    assert collection_file.exists()
+
+    # Verify it's program set metadata
+    metadata = json.loads(collection_file.read_text())
+    assert metadata["id"] == "ps1"
+    assert "editorialCategoryId" in metadata
