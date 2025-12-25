@@ -11,6 +11,29 @@ import requests
 REQUEST_TIMEOUT = 30
 
 
+def _sanitize_folder_name(name: str) -> str:
+    """Sanitize a string to be used as a folder name.
+
+    Args:
+        name: The string to sanitize
+
+    Returns:
+        A sanitized string safe for use as a folder name
+
+    """
+    # Remove or replace characters that are problematic in folder names
+    # Replace forward slashes and other problematic characters with underscores
+    sanitized = re.sub(r'[<>:"/\\|?*]', "_", name)
+    # Remove leading/trailing whitespace and dots
+    sanitized = sanitized.strip(" .")
+    # Replace multiple spaces with single space
+    sanitized = re.sub(r"\s+", " ", sanitized)
+    # Limit length to avoid filesystem issues
+    if len(sanitized) > 100:
+        sanitized = sanitized[:100].rstrip()
+    return sanitized
+
+
 class AudiothekDownloader:
     """ARD Audiothek downloader class."""
 
@@ -88,8 +111,8 @@ class AudiothekDownloader:
                         self.logger.info("Processing folder: %s", item)
                         self.download_from_id(item, target_folder)
                     else:
-                        # Try to extract numeric ID from the end of the folder name
-                        match = re.search(r"(\d+)$", item)
+                        # Try to extract numeric ID from the folder name
+                        match = re.search(r"^(\d+)", item)
                         if match:
                             numeric_id = match.group(1)
                             self.logger.info("Processing folder: %s (ID: %s)", item, numeric_id)
@@ -97,6 +120,132 @@ class AudiothekDownloader:
         except Exception as e:
             self.logger.error("Error while updating folders: %s", e)
             self.logger.exception(e)
+
+    def migrate_folders(self, folder: str | None = None) -> None:
+        """Migrate existing folders to new naming schema (ID + Title).
+
+        Args:
+            folder: The output directory containing folders to migrate (overrides base_folder if provided)
+
+        """
+        target_folder = folder or self.base_folder
+        if not os.path.exists(target_folder):
+            self.logger.error("Output directory %s does not exist.", target_folder)
+            return
+
+        self.logger.info("Starting folder migration in %s", target_folder)
+
+        # Find all subdirectories with numeric IDs
+        try:
+            for item in os.listdir(target_folder):
+                item_path = os.path.join(target_folder, item)
+                if os.path.isdir(item_path):
+                    # Check if the folder name is a pure numeric ID (old format)
+                    if item.isdigit():
+                        self.logger.info("Found old format folder: %s", item)
+
+                        # Try to get the program title by making a request
+                        resource_result = self._determine_resource_type_from_id(item)
+                        if not resource_result:
+                            self.logger.warning("Could not determine resource type for folder: %s", item)
+                            continue
+
+                        resource_type, parsed_id = resource_result
+
+                        # Get program information to extract the title
+                        title = self._get_program_title(parsed_id, resource_type)
+                        if title:
+                            # Create new folder name with ID and title
+                            new_folder_name = f"{item} {_sanitize_folder_name(title)}"
+                            new_folder_path = os.path.join(target_folder, new_folder_name)
+
+                            # Rename the folder
+                            try:
+                                os.rename(item_path, new_folder_path)
+                                self.logger.info("Renamed: %s -> %s", item, new_folder_name)
+                            except OSError as e:
+                                self.logger.error("Failed to rename folder %s: %s", item, e)
+                        else:
+                            self.logger.warning("Could not get title for folder: %s", item)
+
+        except Exception as e:
+            self.logger.error("Error while migrating folders: %s", e)
+            self.logger.exception(e)
+
+    def _get_program_title(self, resource_id: str, resource_type: str) -> str | None:
+        """Get the program title from the API.
+
+        Args:
+            resource_id: The resource ID
+            resource_type: The resource type (program, collection, etc.)
+
+        Returns:
+            The program title or None if not found
+
+        """
+        if resource_type == "episode":
+            return self._get_episode_title(resource_id)
+        elif resource_type in ["program", "collection"]:
+            return self._get_program_set_title(resource_id)
+        return None
+
+    def _get_episode_title(self, episode_id: str) -> str | None:
+        """Get program set title from episode."""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        graphql_dir = os.path.join(base_dir, "graphql")
+        query_path = os.path.join(graphql_dir, "EpisodeQuery.graphql")
+
+        try:
+            with open(query_path) as f:
+                query = f.read()
+
+            response = requests.get(
+                "https://api.ardaudiothek.de/graphql",
+                params={"query": query, "variables": json.dumps({"id": episode_id})},
+                timeout=REQUEST_TIMEOUT,
+            )
+            response_json = response.json()
+
+            node = response_json.get("data", {}).get("result")
+            if node:
+                program_set = node.get("programSet") or {}
+                return program_set.get("title")
+        except Exception as e:
+            self.logger.error("Error getting episode title: %s", e)
+
+        return None
+
+    def _get_program_set_title(self, program_id: str) -> str | None:
+        """Get program set title directly."""
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        graphql_dir = os.path.join(base_dir, "graphql")
+        query_path = os.path.join(graphql_dir, "ProgramSetEpisodesQuery.graphql")
+
+        try:
+            with open(query_path) as f:
+                query = f.read()
+
+            response = requests.get(
+                "https://api.ardaudiothek.de/graphql",
+                params={"query": query, "variables": json.dumps({"id": program_id, "offset": 0, "count": 1})},
+                timeout=REQUEST_TIMEOUT,
+            )
+            response_json = response.json()
+
+            result = response_json.get("data", {}).get("result", {})
+            if result:
+                # For editorial collections, the structure is slightly different
+                if "items" in result:
+                    items = result.get("items", {})
+                    nodes = items.get("nodes", []) or []
+                    if nodes:
+                        first_node = nodes[0]
+                        program_set = first_node.get("programSet") or {}
+                        return program_set.get("title")
+        except Exception as e:
+            self.logger.error("Error getting program set title: %s", e)
+
+        return None
 
     def _determine_resource_type_from_id(self, resource_id: str) -> tuple[str, str] | None:
         """Determine resource type from ID pattern.
@@ -254,8 +403,15 @@ class AudiothekDownloader:
 
             program_set = node.get("programSet") or {}
             programset_id = program_set.get("id") or "episode"
+            programset_title = program_set.get("title") or ""
 
-            program_path: str = os.path.join(folder, programset_id)
+            # Create folder name with ID and title: "123456 Show Title"
+            if programset_title:
+                folder_name = f"{programset_id} {_sanitize_folder_name(programset_title)}"
+            else:
+                folder_name = programset_id
+
+            program_path: str = os.path.join(folder, folder_name)
 
             # get information of program
             try:

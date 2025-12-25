@@ -30,18 +30,24 @@ def main() -> None:
         action="store_true",
         help="Update all subfolders in output directory by crawling through existing IDs",
     )
+    group.add_argument(
+        "--migrate-folders",
+        action="store_true",
+        help="Migrate existing folders to new naming schema (ID + Title)",
+    )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
 
     args = parser.parse_args()
     url = args.url
     id = args.id
     update_folders = args.update_folders
+    migrate_folders = args.migrate_folders
     folder = os.path.realpath(args.folder)
 
-    _main(url, folder, id, update_folders)
+    _main(url, folder, id, update_folders, migrate_folders)
 
 
-def _main(url: str, folder: str, id: str = "", update_folders: bool = False) -> None:
+def _main(url: str, folder: str, id: str = "", update_folders: bool = False, migrate_folders: bool = False) -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
@@ -49,12 +55,17 @@ def _main(url: str, folder: str, id: str = "", update_folders: bool = False) -> 
         folder: The output directory to save downloaded files
         id: The direct ID of the resource (alternative to URL)
         update_folders: Whether to update all existing subfolders
+        migrate_folders: Whether to migrate folders to new naming schema
 
     Returns:
         None
 
     """
     downloader = AudiothekDownloader(folder)
+
+    if migrate_folders:
+        downloader.migrate_folders(folder)
+        return
 
     if update_folders:
         downloader.update_all_folders(folder)

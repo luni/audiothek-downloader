@@ -3,8 +3,9 @@ import os
 from pathlib import Path
 
 import pytest
+import requests
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekDownloader, _sanitize_folder_name
 from audiothek.__main__ import _main
 from tests.conftest import GraphQLMock, MockResponse
 
@@ -72,8 +73,8 @@ def test_download_single_episode_writes_files(tmp_path: Path, mock_requests_get:
     downloader = AudiothekDownloader()
     downloader._download_single_episode("urn:ard:episode:test", str(tmp_path))
 
-    # written under programSet id from mock
-    program_dir = tmp_path / "ps1"
+    # written under programSet id and title from mock: "ps1 Prog"
+    program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
     files = {p.name for p in program_dir.iterdir()}
@@ -91,7 +92,7 @@ def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
 
-    program_dir = tmp_path / "ps1"
+    program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
     # Two pages x two nodes => two meta json files should exist (duplicates are possible by id, but filenames include id)
@@ -119,7 +120,7 @@ def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: objec
         str(tmp_path),
     )
 
-    assert not (tmp_path / "ps1").exists()
+    assert not (tmp_path / "ps1 Prog").exists()
 
 
 def test_main_invalid_url_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -137,8 +138,8 @@ def test_main_invalid_id_logs_and_returns(tmp_path: Path, caplog: pytest.LogCapt
 def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None:
     _main("", str(tmp_path), id="urn:ard:episode:test")
 
-    # written under programSet id from mock
-    program_dir = tmp_path / "ps1"
+    # written under programSet id and title from mock: "ps1 Prog"
+    program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
     files = {p.name for p in program_dir.iterdir()}
@@ -149,7 +150,7 @@ def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None
 def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
     _main("", str(tmp_path), id="ps1")
 
-    program_dir = tmp_path / "ps1"
+    program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
     # Should have called ProgramSetEpisodesQuery twice due to pagination
@@ -180,8 +181,8 @@ def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
     # Test the URL path in main function
     _main("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
 
-    # written under programSet id from mock
-    program_dir = tmp_path / "ps1"
+    # written under programSet id and title from mock: "ps1 Prog"
+    program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
     files = {p.name for p in program_dir.iterdir()}
@@ -201,7 +202,7 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
     # Should not create any directories since no results
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
-    assert not (tmp_path / "ps1").exists()
+    assert not (tmp_path / "ps1 Prog").exists()
 
 
 def test_save_nodes_directory_creation_error_logs_and_returns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -215,7 +216,7 @@ def test_save_nodes_directory_creation_error_logs_and_returns(tmp_path: Path, mo
             "id": "e1",
             "title": "Test Episode",
             "audios": [{"downloadUrl": "https://cdn.test/audio.mp3"}],
-            "programSet": {"id": "ps1"},
+            "programSet": {"id": "ps1", "title": "Prog"},
         }
     ]
 
@@ -380,11 +381,11 @@ def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.
 
 
 def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test update_all_folders with mixed folder names (some ending with numbers)"""
-    # Create test folders with mixed names
+    """Test update_all_folders with mixed folder names (new format and legacy numeric)"""
+    # Create test folders with realistic names
     (tmp_path / "123456").mkdir()
-    (tmp_path / "collection_789012").mkdir()
-    (tmp_path / "show_999999").mkdir()
+    (tmp_path / "789012 Show Title").mkdir()
+    (tmp_path / "999999 Another Show").mkdir()
     (tmp_path / "non_numeric").mkdir()
 
     calls = []
@@ -471,7 +472,7 @@ def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 
 def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    program_dir = tmp_path / "ps1"
+    program_dir = tmp_path / "ps1 Prog"
     program_dir.mkdir(parents=True)
 
     # save_nodes builds filename as: <sanitized_title>_<node_id>
@@ -503,7 +504,7 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
                 "title": "Existing e1",
                 "image": {"url": "https://cdn.test/image_{width}.jpg", "url1X1": "https://cdn.test/image1x1_{width}.jpg"},
                 "audios": [{"downloadUrl": "https://cdn.test/audio.mp3"}],
-                "programSet": {"id": "ps1"},
+                "programSet": {"id": "ps1", "title": "Prog"},
             }
         ],
         str(tmp_path),
@@ -512,3 +513,633 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
     # Only mp3 should be skipped because it exists; images too. No network calls expected.
     assert calls == []
     assert os.path.exists(program_dir / f"{filename}.json")
+
+
+def test_migrate_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders with numeric folders."""
+    # Create test folders with numeric names (old format)
+    (tmp_path / "123456").mkdir()
+    (tmp_path / "789012").mkdir()
+    (tmp_path / "non_numeric").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(self, folder_id):
+        if folder_id in ["123456", "789012"]:
+            return "program", folder_id
+        return None
+
+    def _mock_get_program_title(self, resource_id, resource_type):
+        if resource_id == "123456":
+            return "Test Show 1"
+        elif resource_id == "789012":
+            return "Test Show 2"
+        return None
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        downloader.migrate_folders(str(tmp_path))
+
+    # Check that folders were renamed
+    assert not (tmp_path / "123456").exists()
+    assert not (tmp_path / "789012").exists()
+    assert (tmp_path / "123456 Test Show 1").exists()
+    assert (tmp_path / "789012 Test Show 2").exists()
+    # Non-numeric folder should be unchanged
+    assert (tmp_path / "non_numeric").exists()
+
+
+def test_migrate_folders_nonexistent_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders with nonexistent directory."""
+    downloader = AudiothekDownloader()
+
+    # Should not raise an exception, just log an error
+    downloader.migrate_folders(str(tmp_path / "nonexistent"))
+
+
+def test_migrate_folders_no_numeric_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders with no numeric folders."""
+    # Create test folders with non-numeric names
+    (tmp_path / "already_migrated 123456 Show Title").mkdir()
+    (tmp_path / "non_numeric").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(self, folder_id):
+        calls.append(("determine_resource_type_from_id", folder_id))
+        return None
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        downloader.migrate_folders(str(tmp_path))
+
+    # Should not have called determine_resource_type_from_id since no numeric folders
+    assert len(calls) == 0
+    # Folders should be unchanged
+    assert (tmp_path / "already_migrated 123456 Show Title").exists()
+    assert (tmp_path / "non_numeric").exists()
+
+
+def test_main_with_migrate_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with migrate_folders option."""
+    # Create test folders with numeric names (old format)
+    (tmp_path / "123456").mkdir()
+    (tmp_path / "789012").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(self, folder_id):
+        if folder_id in ["123456", "789012"]:
+            return "program", folder_id
+        return None
+
+    def _mock_get_program_title(self, resource_id, resource_type):
+        if resource_id == "123456":
+            return "Test Show 1"
+        elif resource_id == "789012":
+            return "Test Show 2"
+        return None
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+
+    with monkeypatch.context():
+        _main("", str(tmp_path), update_folders=False, migrate_folders=True)
+
+    # Check that folders were renamed
+    assert not (tmp_path / "123456").exists()
+    assert not (tmp_path / "789012").exists()
+    assert (tmp_path / "123456 Test Show 1").exists()
+    assert (tmp_path / "789012 Test Show 2").exists()
+
+
+def test_migrate_folders_rename_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders when rename fails."""
+    # Create test folder with numeric name
+    (tmp_path / "123456").mkdir()
+
+    def _mock_determine_resource_type_from_id(self, folder_id):
+        return "program", folder_id
+
+    def _mock_get_program_title(self, resource_id, resource_type):
+        return "Test Show"
+
+    def _mock_os_rename_error(src, dst):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+    monkeypatch.setattr("os.rename", _mock_os_rename_error)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        downloader.migrate_folders(str(tmp_path))
+
+    # Original folder should still exist since rename failed
+    assert (tmp_path / "123456").exists()
+
+
+def test_get_episode_title_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_episode_title when request fails."""
+    downloader = AudiothekDownloader()
+
+    def _mock_open_file_error():
+        raise FileNotFoundError("File not found")
+
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: _mock_open_file_error())
+
+    result = downloader._get_episode_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when request fails."""
+    downloader = AudiothekDownloader()
+
+    def _mock_open_file_error():
+        raise FileNotFoundError("File not found")
+
+    monkeypatch.setattr("builtins.open", lambda *args, **kwargs: _mock_open_file_error())
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_get_program_title_episode_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_title with episode type."""
+    downloader = AudiothekDownloader()
+
+    def _mock_get_episode_title(self, episode_id):
+        return "Episode Title"
+
+    monkeypatch.setattr(AudiothekDownloader, "_get_episode_title", _mock_get_episode_title)
+
+    result = downloader._get_program_title("test_id", "episode")
+    assert result == "Episode Title"
+
+
+def test_get_program_title_program_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_title with program type."""
+    downloader = AudiothekDownloader()
+
+    def _mock_get_program_set_title(self, program_id):
+        return "Program Title"
+
+    monkeypatch.setattr(AudiothekDownloader, "_get_program_set_title", _mock_get_program_set_title)
+
+    result = downloader._get_program_title("test_id", "program")
+    assert result == "Program Title"
+
+
+def test_get_program_title_unknown_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_title with unknown type."""
+    downloader = AudiothekDownloader()
+
+    result = downloader._get_program_title("test_id", "unknown")
+    assert result is None
+
+
+def test_update_all_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test update_all_folders when exception occurs."""
+    # Create test folder
+    (tmp_path / "123456").mkdir()
+
+    def _mock_listdir_error(path):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr("os.listdir", _mock_listdir_error)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        # Should not raise exception, just log error
+        downloader.update_all_folders(str(tmp_path))
+
+
+def test_migrate_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders when exception occurs."""
+    # Create test folder
+    (tmp_path / "123456").mkdir()
+
+    def _mock_listdir_error(path):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr("os.listdir", _mock_listdir_error)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        # Should not raise exception, just log error
+        downloader.migrate_folders(str(tmp_path))
+
+
+def test_sanitize_folder_name_edge_cases() -> None:
+    """Test _sanitize_folder_name with edge cases."""
+    # Test empty string
+    assert _sanitize_folder_name("") == ""
+
+    # Test string with only problematic characters
+    assert _sanitize_folder_name("<>:\"/\\|?*") == "_________"
+
+    # Test string with leading/trailing spaces and dots
+    assert _sanitize_folder_name("  .test.  ") == "test"
+
+    # Test string with multiple spaces
+    assert _sanitize_folder_name("test    multiple    spaces") == "test multiple spaces"
+
+    # Test long string gets truncated
+    long_name = "a" * 150
+    result = _sanitize_folder_name(long_name)
+    assert len(result) == 100
+    assert result.endswith("a")
+
+
+def test_audiothek_downloader_initialization() -> None:
+    """Test AudiothekDownloader initialization with default and custom folder."""
+    # Test default initialization
+    downloader = AudiothekDownloader()
+    assert downloader.base_folder == "./output"
+
+    # Test custom folder initialization
+    downloader = AudiothekDownloader("/custom/path")
+    assert downloader.base_folder == "/custom/path"
+
+
+def test_migrate_folders_resource_type_none_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders when _determine_resource_type_from_id returns None."""
+    # Create test folder with numeric name
+    (tmp_path / "123456").mkdir()
+
+    def _mock_determine_resource_type_from_id_none(self, folder_id):
+        return None
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id_none)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        downloader.migrate_folders(str(tmp_path))
+
+    # Folder should still exist since resource type couldn't be determined
+    assert (tmp_path / "123456").exists()
+
+
+def test_get_episode_title_api_response_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_episode_title with various API response scenarios."""
+    downloader = AudiothekDownloader()
+
+    # Test when API response has no data
+    def _mock_requests_get_no_data(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {"data": {}}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_no_data)
+
+    result = downloader._get_episode_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_no_items(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when response has no items."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_no_items(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {"data": {"result": {}}}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_no_items)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_empty_nodes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when nodes array is empty."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_empty_nodes(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {"data": {"result": {"items": {"nodes": []}}}}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_empty_nodes)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_no_program_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when node has no programSet."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_no_program_set(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {"data": {"result": {"items": {"nodes": [{"id": "test"}]}}}}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_no_program_set)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_save_nodes_no_download_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _save_nodes when node has no download URL."""
+    downloader = AudiothekDownloader()
+
+    # Node with empty audios array
+    node = {
+        "id": "test_id",
+        "title": "Test Episode",
+        "audios": [],
+        "programSet": {"id": "ps1", "title": "Test Program"}
+    }
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # No folder should be created since no audio URL
+    assert not (tmp_path / "ps1 Test Program").exists()
+
+
+def test_save_nodes_no_audio_in_first_item(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _save_nodes when first audio item is not a dict."""
+    downloader = AudiothekDownloader()
+
+    # Node with audios array where first item is not a dict
+    node = {
+        "id": "test_id",
+        "title": "Test Episode",
+        "audios": ["not_a_dict"],
+        "programSet": {"id": "ps1", "title": "Test Program"}
+    }
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # No folder should be created since no valid audio
+    assert not (tmp_path / "ps1 Test Program").exists()
+
+
+def test_save_nodes_empty_download_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _save_nodes when audio has empty download URL."""
+    downloader = AudiothekDownloader()
+
+    # Node with audio but empty URLs
+    node = {
+        "id": "test_id",
+        "title": "Test Episode",
+        "audios": [{"downloadUrl": "", "url": ""}],
+        "programSet": {"id": "ps1", "title": "Test Program"}
+    }
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # No folder should be created since no valid audio URL
+    assert not (tmp_path / "ps1 Test Program").exists()
+
+
+def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test download_from_id uses base_folder when no folder provided."""
+    downloader = AudiothekDownloader("/default/path")
+
+    calls = []
+
+    def _mock_download_from_id(self, resource_id, folder):
+        calls.append(("download_from_id", resource_id, folder))
+
+    def _mock_download_single_episode(self, episode_id, folder):
+        calls.append(("download_single_episode", episode_id, folder))
+
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("program", rid))
+    monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
+
+    downloader.download_from_id("test_id")
+
+    # Should have used the base_folder and called download_collection
+    assert len(calls) == 1
+    assert calls[0][0] == "download_collection"
+    assert calls[0][2] == "/default/path"
+
+
+def test_get_episode_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_episode_title when requests.get raises exception."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_exception(*args, **kwargs):
+        raise requests.exceptions.RequestException("Network error")
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_exception)
+
+    result = downloader._get_episode_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when requests.get raises exception."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_exception(*args, **kwargs):
+        raise requests.exceptions.RequestException("Network error")
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_exception)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_get_program_set_title_missing_title_in_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title when node exists but has no title."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_no_title(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {"data": {"result": {"items": {"nodes": [{"programSet": {}}]}}}}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_no_title)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result is None
+
+
+def test_download_from_id_with_custom_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test download_from_id uses custom folder when provided."""
+    downloader = AudiothekDownloader("/default/path")
+
+    calls = []
+
+    def _mock_download_single_episode(self, episode_id, folder):
+        calls.append(("download_single_episode", episode_id, folder))
+
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("episode", rid))
+    monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
+
+    downloader.download_from_id("test_id", str(tmp_path))
+
+    # Should have used the custom folder and called download_single_episode
+    assert len(calls) == 1
+    assert calls[0][0] == "download_single_episode"
+    assert calls[0][2] == str(tmp_path)
+
+
+def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_episode_title with valid API response."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_valid(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {
+                    "data": {
+                        "result": {
+                            "programSet": {
+                                "title": "Test Program Title"
+                            }
+                        }
+                    }
+                }
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_valid)
+
+    result = downloader._get_episode_title("test_id")
+    assert result == "Test Program Title"
+
+
+def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_program_set_title with valid API response."""
+    downloader = AudiothekDownloader()
+
+    def _mock_requests_get_valid(*args, **kwargs):
+        class MockResponse:
+            def json(self):
+                return {
+                    "data": {
+                        "result": {
+                            "items": {
+                                "nodes": [
+                                    {
+                                        "programSet": {
+                                            "title": "Test Program Set Title"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get_valid)
+
+    result = downloader._get_program_set_title("test_id")
+    assert result == "Test Program Set Title"
+
+
+def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test download_from_url calls _download_collection with correct editorial flag."""
+    downloader = AudiothekDownloader()
+
+    calls = []
+
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", url, resource_id, folder, is_editorial))
+
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return "collection", resource_id
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
+
+    downloader.download_from_id("test_id")
+
+    # Should have called download_collection with is_editorial=True for collection
+    assert len(calls) == 1
+    assert calls[0][0] == "download_collection"
+    assert calls[0][4] is True  # is_editorial flag
+
+
+def test_migrate_folders_logs_warning_when_no_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test migrate_folders logs warning when title cannot be retrieved."""
+    # Create test folder with numeric name
+    (tmp_path / "123456").mkdir()
+
+    def _mock_determine_resource_type_from_id(self, folder_id):
+        return "program", folder_id
+
+    def _mock_get_program_title_none(self, resource_id, resource_type):
+        return None
+
+    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title_none)
+
+    with monkeypatch.context():
+        downloader = AudiothekDownloader()
+        downloader.migrate_folders(str(tmp_path))
+
+    # Folder should still exist since title couldn't be retrieved
+    assert (tmp_path / "123456").exists()
+
+
+def test_save_nodes_without_programset_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _save_nodes when programSet has no title."""
+    downloader = AudiothekDownloader()
+
+    # Node with no programSet title
+    node = {
+        "id": "test_id",
+        "title": "Test Episode",
+        "audios": [{"downloadUrl": "https://example.com/audio.mp3"}],
+        "programSet": {"id": "ps1"}  # No title field
+    }
+
+    def _mock_requests_get(*args, **kwargs):
+        class MockResponse:
+            content = b"audio data"
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_requests_get)
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # Should create folder with just the ID when no title
+    assert (tmp_path / "ps1").exists()
+
+
+def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test download_from_url calls _download_collection for program type."""
+    downloader = AudiothekDownloader()
+
+    calls = []
+
+    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", url, resource_id, folder, is_editorial))
+
+    def _mock_parse_url(self, url):
+        return "program", "test_id"
+
+    monkeypatch.setattr(AudiothekDownloader, "_parse_url", _mock_parse_url)
+    monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
+
+    downloader.download_from_url("https://example.com/test", str(tmp_path))
+
+    # Should have called download_collection with is_editorial=False for program
+    assert len(calls) == 1
+    assert calls[0][0] == "download_collection"
+    assert calls[0][4] is False  # is_editorial flag for program type
