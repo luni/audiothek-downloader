@@ -8,6 +8,8 @@ This CLI downloads ARD Audiothek programs, editorial collections, or individual 
 - Iterates through paginated GraphQL responses to download every available episode (continues until the API says no more pages).
 - Saves cover images, MP3s, and rich metadata in a predictable folder hierarchy.
 - Skips files that already exist, so reruns are effectively resumable.
+- Update existing folders by crawling through subdirectories and refreshing content.
+- Support for direct resource IDs (URNs or numeric IDs) as an alternative to URLs.
 
 ## Requirements
 
@@ -37,8 +39,10 @@ uv run python audiothek.py --help
 
 | Option        | Description                                                                                       |
 | ------------- | ------------------------------------------------------------------------------------------------- |
-| `--url`, `-u` | Required. Audiothek URL (program, editorial collection, page, or single episode URN).             |
-| `--folder`, `-f` | Optional. Destination directory. Defaults to `./output` (paths will be resolved absolutely). |
+| `--url`, `-u` | Audiothek URL (program, editorial collection, page, or single episode URN).                       |
+| `--id`, `-i` | Audiothek resource ID directly (e.g. `urn:ard:episode:123456789` or `123456789`).                 |
+| `--update-folders` | Update all subfolders in output directory by crawling through existing IDs.                       |
+| `--folder`, `-f` | Destination directory. Defaults to `./output` (paths will be resolved absolutely). |
 
 ### Download a program (all episodes)
 
@@ -56,6 +60,29 @@ uv run python audiothek.py --url 'https://www.ardaudiothek.de/seite/hoerenswerte
 
 ```bash
 uv run python audiothek.py --url 'https://www.ardaudiothek.de/episode/foo/urn:ard:episode:1234567890abcdef/'
+```
+
+### Download using resource ID directly
+
+```bash
+# Download a program by numeric ID
+uv run python audiothek.py --id '12197351'
+
+# Download an episode by URN
+uv run python audiothek.py --id 'urn:ard:episode:1234567890abcdef'
+
+# Download a collection by URN
+uv run python audiothek.py --id 'urn:ard:page:5a615c6cb3a42c0001cfbaf8'
+```
+
+### Update all existing folders
+
+```bash
+# Crawl through all subfolders in the output directory and update them
+uv run python audiothek.py --update-folders
+
+# Update folders in a custom directory
+uv run python audiothek.py --update-folders --folder '/path/to/archive'
 ```
 
 ### Store files in a custom directory
@@ -94,3 +121,4 @@ You can tweak these documents if ARD changes their API structure.
 1. Only episodes that expose a `downloadUrl` (or fallback `url`) can be saved—DRM-protected content may not download.
 2. Large feeds are paginated in batches of 24 items; the downloader loops until `hasNextPage` is `false`.
 3. Respect ARD Audiothek’s terms of service and only download content you are allowed to store locally.
+4. The `--update-folders` functionality replaces the previous `scrape.sh` script for updating existing downloads.
