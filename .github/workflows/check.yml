@@ -33,6 +33,10 @@ jobs:
           wget -qO- https://astral.sh/uv/install.sh | sh
           uv sync
 
+      - name: Install package in editable mode
+        run: |
+          uv pip install -e .
+
       - name: Run Ruff (PEP 8 Formatting)
         run: |
           uv run make format
