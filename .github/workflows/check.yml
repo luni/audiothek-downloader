@@ -59,5 +59,4 @@ jobs:
 
       - name: Run pytest (Test Suite)
         run: |
-          cp config.json.sample config.json
           uv run make test
