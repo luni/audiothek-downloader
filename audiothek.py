@@ -12,27 +12,67 @@ REQUEST_TIMEOUT = 30
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]%(message)s")
 
 
-def main(url: str, folder: str) -> None:
+def main(url: str, folder: str, id: str = "") -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
         url: The URL of the ARD Audiothek show or collection
         folder: The output directory to save downloaded files
+        id: The direct ID of the resource (alternative to URL)
 
     Returns:
         None
 
     """
-    resource = parse_url(url)
-    if not resource:
-        logging.error("Could not determine resource ID from URL.")
-        return
-
-    resource_type, resource_id = resource
-    if resource_type == "episode":
-        download_single_episode(resource_id, folder)
+    if id:
+        resource = determine_resource_type_from_id(id)
+        if not resource:
+            logging.error("Could not determine resource type from ID.")
+            return
+        resource_type, resource_id = resource
+        if resource_type == "episode":
+            download_single_episode(resource_id, folder)
+        else:
+            download_collection("", resource_id, folder, resource_type == "collection")
     else:
-        download_collection(url, resource_id, folder, resource_type == "collection")
+        resource = parse_url(url)
+        if not resource:
+            logging.error("Could not determine resource ID from URL.")
+            return
+
+        resource_type, resource_id = resource
+        if resource_type == "episode":
+            download_single_episode(resource_id, folder)
+        else:
+            download_collection(url, resource_id, folder, resource_type == "collection")
+
+
+def determine_resource_type_from_id(id: str) -> tuple[str, str] | None:
+    """Determine resource type from ID pattern.
+
+    Args:
+        id: The ID to analyze
+
+    Returns:
+        A tuple of (resource_type, id) where resource_type is one of 'episode', 'collection', or 'program'
+
+    """
+    if id.startswith("urn:ard:episode:"):
+        return "episode", id
+    if id.startswith("urn:ard:page:"):
+        return "collection", id
+    if id.startswith("urn:ard:show:"):
+        return "program", id
+    # fallback: treat other urns as program sets
+    if id.startswith("urn:ard:"):
+        return "program", id
+    # numeric IDs are typically programs
+    if id.isdigit():
+        return "program", id
+    # alphanumeric IDs (like "ps1") are also treated as programs
+    if re.match(r"^[a-zA-Z0-9]+$", id):
+        return "program", id
+    return None
 
 
 def parse_url(url: str) -> tuple[str, str] | None:
@@ -226,17 +266,25 @@ def save_nodes(nodes: list[dict[str, Any]], folder: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
         "--url",
         "-u",
         type=str,
         default="",
-        required=True,
         help="Insert audiothek url (e.g. https://www.ardaudiothek.de/sendung/kein-mucks-der-krimi-podcast-mit-bastian-pastewka/urn:ard:show:e01e22ff9344b2a4/)",
+    )
+    group.add_argument(
+        "--id",
+        "-i",
+        type=str,
+        default="",
+        help="Insert audiothek resource ID directly (e.g. urn:ard:episode:123456789 or 123456789)",
     )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
 
     args = parser.parse_args()
     url = args.url
+    id = args.id
     folder = os.path.realpath(args.folder)
-    main(url, folder)
+    main(url, folder, id)
