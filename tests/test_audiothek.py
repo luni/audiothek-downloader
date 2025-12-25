@@ -265,19 +265,33 @@ def test_argument_parser_setup() -> None:
         default="",
         help="Insert audiothek resource ID directly (e.g. urn:ard:episode:123456789 or 123456789)",
     )
+    group.add_argument(
+        "--update-folders",
+        action="store_true",
+        help="Update all subfolders in output directory by crawling through existing IDs",
+    )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
 
     # Test parsing with URL
     args = parser.parse_args(["--url", "https://example.com", "--folder", "/tmp"])
     assert args.url == "https://example.com"
     assert args.id == ""
+    assert args.update_folders is False
     assert args.folder == "/tmp"
 
     # Test parsing with ID
     args = parser.parse_args(["--id", "urn:ard:episode:test"])
     assert args.url == ""
     assert args.id == "urn:ard:episode:test"
+    assert args.update_folders is False
     assert args.folder == "./output"
+
+    # Test parsing with --update-folders
+    args = parser.parse_args(["--update-folders", "--folder", "/custom/output"])
+    assert args.url == ""
+    assert args.id == ""
+    assert args.update_folders is True
+    assert args.folder == "/custom/output"
 
 
 def test_main_script_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,6 +326,130 @@ def test_main_script_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     finally:
         # Restore original sys.argv
         sys.argv = original_argv
+
+
+def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test update_all_folders with numeric folder names"""
+    # Create test folders with numeric names
+    (tmp_path / "123456").mkdir()
+    (tmp_path / "789012").mkdir()
+    (tmp_path / "non_numeric_folder").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(folder_id):
+        if folder_id in ["123456", "789012"]:
+            return "program", folder_id
+        return None
+
+    def _mock_download_collection(url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder, is_editorial))
+
+    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+
+    with monkeypatch.context():
+        audiothek.update_all_folders(str(tmp_path))
+
+    # Should have called download_collection for both numeric folders (order doesn't matter)
+    assert len(calls) == 2
+
+    # Check that both expected calls are present, regardless of order
+    expected_calls = [
+        ("download_collection", "123456", str(tmp_path), False),
+        ("download_collection", "789012", str(tmp_path), False)
+    ]
+
+    for expected_call in expected_calls:
+        assert expected_call in calls
+
+
+def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test update_all_folders with mixed folder names (some ending with numbers)"""
+    # Create test folders with mixed names
+    (tmp_path / "123456").mkdir()
+    (tmp_path / "collection_789012").mkdir()
+    (tmp_path / "show_999999").mkdir()
+    (tmp_path / "non_numeric").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(folder_id):
+        if folder_id in ["123456", "789012", "999999"]:
+            return "program", folder_id
+        return None
+
+    def _mock_download_collection(url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder, is_editorial))
+
+    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+
+    with monkeypatch.context():
+        audiothek.update_all_folders(str(tmp_path))
+
+    # Should have called download_collection for all folders with numeric IDs
+    assert len(calls) == 3
+    resource_ids = [call[1] for call in calls]
+    assert "123456" in resource_ids
+    assert "789012" in resource_ids
+    assert "999999" in resource_ids
+
+
+def test_update_all_folders_nonexistent_directory(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test update_all_folders with nonexistent directory"""
+    nonexistent_dir = str(tmp_path / "nonexistent")
+
+    with caplog.at_level("ERROR"):
+        audiothek.update_all_folders(nonexistent_dir)
+
+    assert any("does not exist" in r.message for r in caplog.records)
+
+
+def test_update_all_folders_invalid_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test update_all_folders with invalid IDs"""
+    # Create test folders - one with invalid numeric ID, one with valid numeric ID
+    (tmp_path / "999999").mkdir()  # This will be treated as numeric but invalid by our mock
+    (tmp_path / "123456").mkdir()
+
+    calls = []
+
+    def _mock_determine_resource_type_from_id(folder_id):
+        if folder_id == "123456":
+            return "program", folder_id
+        return None  # 999999 will return None (invalid)
+
+    def _mock_download_collection(url, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder, is_editorial))
+
+    monkeypatch.setattr(audiothek, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(audiothek, "download_collection", _mock_download_collection)
+
+    with caplog.at_level("ERROR"):
+        audiothek.update_all_folders(str(tmp_path))
+
+    # Should have called download_collection only for valid ID
+    assert len(calls) == 1
+    assert calls[0] == ("download_collection", "123456", str(tmp_path), False)
+
+    # Should have logged error for invalid numeric ID
+    assert any("Could not determine resource type from ID: 999999" in r.message for r in caplog.records)
+
+
+def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with update_folders=True"""
+    calls = []
+
+    def _mock_update_all_folders(folder):
+        calls.append(("update_all_folders", folder))
+
+    monkeypatch.setattr(audiothek, "update_all_folders", _mock_update_all_folders)
+
+    # Test with update_folders=True
+    audiothek.main("", str(tmp_path), update_folders=True)
+
+    assert len(calls) == 1
+    assert calls[0] == ("update_all_folders", str(tmp_path))
 
 
 def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

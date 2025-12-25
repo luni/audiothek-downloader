@@ -12,18 +12,23 @@ REQUEST_TIMEOUT = 30
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]%(message)s")
 
 
-def main(url: str, folder: str, id: str = "") -> None:
+def main(url: str, folder: str, id: str = "", update_folders: bool = False) -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
         url: The URL of the ARD Audiothek show or collection
         folder: The output directory to save downloaded files
         id: The direct ID of the resource (alternative to URL)
+        update_folders: Whether to update all existing subfolders
 
     Returns:
         None
 
     """
+    if update_folders:
+        update_all_folders(folder)
+        return
+
     if id:
         resource = determine_resource_type_from_id(id)
         if not resource:
@@ -183,6 +188,62 @@ def download_collection(url: str, id: str, folder: str, is_editorial_collection:
     save_nodes(nodes, folder)
 
 
+def update_all_folders(folder: str) -> None:
+    """Update all subfolders in the output directory by crawling through existing IDs.
+
+    This function mimics the behavior of scrape.sh - it finds all subdirectories
+    that end with numeric IDs and processes each one.
+
+    Args:
+        folder: The output directory containing subfolders to update
+
+    Returns:
+        None
+
+    """
+    if not os.path.exists(folder):
+        logging.error("Output directory %s does not exist.", folder)
+        return
+
+    logging.info("Starting update of all folders in %s", folder)
+
+    # Find all subdirectories that end with numeric IDs (like scrape.sh does)
+    try:
+        for item in os.listdir(folder):
+            item_path = os.path.join(folder, item)
+            if os.path.isdir(item_path):
+                # Check if the folder name ends with a numeric ID
+                if item.isdigit():
+                    logging.info("Processing folder: %s", item)
+                    resource = determine_resource_type_from_id(item)
+                    if resource:
+                        resource_type, resource_id = resource
+                        if resource_type == "episode":
+                            download_single_episode(resource_id, folder)
+                        else:
+                            download_collection("", resource_id, folder, resource_type == "collection")
+                    else:
+                        logging.error("Could not determine resource type from ID: %s", item)
+                else:
+                    # Try to extract numeric ID from the end of the folder name
+                    match = re.search(r"(\d+)$", item)
+                    if match:
+                        numeric_id = match.group(1)
+                        logging.info("Processing folder: %s (ID: %s)", item, numeric_id)
+                        resource = determine_resource_type_from_id(numeric_id)
+                        if resource:
+                            resource_type, resource_id = resource
+                            if resource_type == "episode":
+                                download_single_episode(resource_id, folder)
+                            else:
+                                download_collection("", resource_id, folder, resource_type == "collection")
+                        else:
+                            logging.error("Could not determine resource type from ID: %s", numeric_id)
+    except Exception as e:
+        logging.error("Error while updating folders: %s", e)
+        logging.exception(e)
+
+
 def save_nodes(nodes: list[dict[str, Any]], folder: str) -> None:
     """Write episode assets (cover, audio, metadata) to disk."""
     for index, node in enumerate(nodes):
@@ -281,10 +342,16 @@ if __name__ == "__main__":
         default="",
         help="Insert audiothek resource ID directly (e.g. urn:ard:episode:123456789 or 123456789)",
     )
+    group.add_argument(
+        "--update-folders",
+        action="store_true",
+        help="Update all subfolders in output directory by crawling through existing IDs",
+    )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
 
     args = parser.parse_args()
     url = args.url
     id = args.id
+    update_folders = args.update_folders
     folder = os.path.realpath(args.folder)
-    main(url, folder, id)
+    main(url, folder, id, update_folders)
