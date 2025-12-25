@@ -1,0 +1,37 @@
+query EpisodeQuery($id: ID!) {
+  result: item(id: $id) {
+    id
+    coreId
+    itemType
+    title
+    path
+    description
+    duration
+    publishDate
+    summary
+
+    image {
+      url
+      url1X1
+    }
+
+    programSet {
+      id
+      coreId
+      path
+      title
+      publicationService {
+        title
+        organizationName
+        path
+      }
+    }
+
+    audios {
+      url
+      mimeType
+      downloadUrl
+      allowDownload
+    }
+  }
+}

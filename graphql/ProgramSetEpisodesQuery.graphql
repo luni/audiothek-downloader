@@ -1,9 +1,17 @@
-query ProgramSetEpisodesQuery($id: ID!) {
+query ProgramSetEpisodesQuery($id: ID!, $offset: Int!, $count: Int!) {
   result: programSet(id: $id) {
     items(
-      orderBy: PUBLISH_DATE_DESC
-      filter: { isPublished: { equalTo: true } }
+      offset: $offset
+      first: $count
+      filter: {
+        isPublished: { equalTo: true }
+        itemType: { notEqualTo: EVENT_LIVESTREAM }
+      }
     ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
       nodes {
         id
         title
@@ -25,7 +33,9 @@ query ProgramSetEpisodesQuery($id: ID!) {
 
         audios {
           url
+          mimeType
           downloadUrl
+          allowDownload
         }
       }
     }

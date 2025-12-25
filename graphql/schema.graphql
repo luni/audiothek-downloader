@@ -10,32 +10,9 @@ directive @external on FIELD_DEFINITION
 
 directive @cacheControl(maxAge: Int, scope: CacheControlScope, inheritMaxAge: Boolean) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
-
-directive @provides(fields: _FieldSet!) on FIELD_DEFINITION
-
 directive @sameAs(uri: URI) on FIELD_DEFINITION | OBJECT | INTERFACE | UNION
 
-scalar _Any
-
-"""A union of all federated types (those that use the @key directive)."""
-union _Entity = Config | EditorialCategory | Item | ProgramSet | PublicationService | Organization | PermanentLivestream | AudioBinary | Grouping | CategoriesToProgramSet | Concept | Transcript | EditorialCollection | Migration | ImageBinary | ImageCollection | Image
-
-"""
-Used to represent a set of fields. Grammatically, a field set is a
-selection set minus the braces.
-"""
 scalar _FieldSet
-
-"""Describes our federated service."""
-type _Service {
-  """
-  The GraphQL Schema Language definiton of our endpoint including the
-  Apollo Federation directives (but not their definitions or the special
-  Apollo Federation fields).
-  """
-  sdl: String @deprecated(reason: "Only Apollo Federation should use this")
-}
 
 enum AspectRatio {
   SQUARE
@@ -51,7 +28,7 @@ type AssetType {
   allowDownload: Boolean
 
   """file size in byte"""
-  size: Int
+  size: Int @deprecated(reason: "no longer in use, not provided by ARD Core")
 
   """title to be displayed in download tab e.g. 'MPEG-4 AAC Audio (m4a)'"""
   title: String
@@ -160,13 +137,20 @@ input BigIntFilterB {
 
 type Board {
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   id: ID!
+
+  """URN of this page, generated from its external ID by Sophora."""
+  coreId: String
+  sophoraId: String
+  coremediaId: Int @deprecated(reason: "only for internal/debugging use")
   title: String
   image: ImageType
   sections(hideUnresolvedTeasers: Boolean = true, hidePersonaliziedSections: Boolean = false, hideErrors: Boolean = true, limit: Int, offset: Int = 0): [Section!]
-  widgets: [SophoraWidget!]
+  widgets: [SophoraWidget!] @deprecated(reason: "No longer supported, use 'sections'.")
   sharingUrl: URL
+  path: String
+  url(variant: UrlVariant): String
   _raw: JSON @deprecated(reason: "only for internal debugging")
   recentItems(first: Int, last: Int, offset: Int, before: Cursor, after: Cursor, orderBy: [ItemsOrderBy!], condition: ItemCondition, filter: ItemFilter): ItemsConnection!
   recentItemsList(first: Int, offset: Int, orderBy: [ItemsOrderBy!], condition: ItemCondition, filter: ItemFilter): [Item!]
@@ -293,6 +277,7 @@ type BookmarkList implements BookmarkListInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ This is a generated connection for BookmarkList """
@@ -375,6 +360,7 @@ interface BookmarkListInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ The payload returned from mutations of BookmarkList. """
@@ -843,6 +829,113 @@ enum ConfigsOrderBy {
   PRIMARY_KEY_DESC
 }
 
+type ContactOption {
+  hotline: String
+  email: String
+  whatsapp: String
+  telegram: String
+  calloutMessage: String
+}
+
+"""
+A filter to be used against `ContactOption` object types. All fields are combined with a logical ‘and.’
+"""
+input ContactOptionFilter {
+  """Filter by the object’s `hotline` field."""
+  hotline: StringFilter
+
+  """Filter by the object’s `email` field."""
+  email: StringFilter
+
+  """Filter by the object’s `whatsapp` field."""
+  whatsapp: StringFilter
+
+  """Filter by the object’s `telegram` field."""
+  telegram: StringFilter
+
+  """Filter by the object’s `calloutMessage` field."""
+  calloutMessage: StringFilter
+
+  """Checks for all expressions in this list."""
+  and: [ContactOptionFilter!]
+
+  """Checks for any expressions in this list."""
+  or: [ContactOptionFilter!]
+
+  """Negates the expression."""
+  not: ContactOptionFilter
+}
+
+"""An input for mutations affecting `ContactOption`"""
+input ContactOptionInput {
+  hotline: String
+  email: String
+  whatsapp: String
+  telegram: String
+  calloutMessage: String
+}
+
+interface CoreAsset {
+  id: ID!
+  coreId: String
+  externalIds: [String]
+  title: String!
+  image: ImageType
+
+  """longer description / show notes"""
+  description: HTML
+  audioList: [AudioBinary!]
+  sharingUrl: URL
+  url(variant: UrlVariant): String
+  path: String
+  tracking(v: TrackingVariant): JSON
+  coreDocument: JSON
+  core(filter: String, key: String): JSON
+  mediaCollection(v: MediaCollectionVariant): JSON
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+}
+
+type CoreSection implements ItemInterface & CoreAsset & Teaser & CoreTeaser {
+  id: ID!
+  coreId: String
+  assetId: String
+  fusionId: String
+  coreType: ItemType! @deprecated(reason: "use itemType")
+  itemType: ItemType!
+  rowId: Int!
+  externalIds: [String]
+  title: String!
+  image: ImageType
+  startDate: Datetime
+  endDate: Datetime
+  publishDate: Datetime!
+  isPublished: Boolean
+  duration(variant: DurationVariant): Int
+  programSet: ProgramSet
+  editorialDescription: String @deprecated(reason: "experimental, use teasers.editorialDescription instead of nodes")
+
+  """same as summary"""
+  synopsis: String
+
+  """same as synopsis"""
+  summary: String
+
+  """longer description / show notes"""
+  description: HTML
+  audios: [AssetType!]
+  audioList: [AudioBinary!]
+  sharingUrl: URL
+  url(variant: UrlVariant): String
+  path: String
+  tracking(v: TrackingVariant): JSON
+  coreDocument: JSON
+  core(filter: String, key: String): JSON
+  numberOfElements: Int @deprecated(reason: "is always null")
+  mediaCollection(v: MediaCollectionVariant): JSON
+  _links: JSON @deprecated(reason: "only for old / hal-json queries")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+}
+
 interface CoreTeaser {
   id: ID!
   title: String!
@@ -1038,6 +1131,11 @@ type DepublishExpiredItemsPayload {
   query: Query
 }
 
+type DownloadList {
+  id: ID!
+  tracking(v: TrackingVariant): JSON
+}
+
 enum DurationVariant {
   SECONDS
   ISO8601
@@ -1052,8 +1150,8 @@ type EditorialCategoriesConnection {
   edges: [EditorialCategoriesEdge!]!
   pageInfo: PageInfo
   totalCount: Int!
-  title: String
   tracking: JSON
+  title: String
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -1080,6 +1178,8 @@ enum EditorialCategoriesOrderBy {
   SOPHORA_ID_DESC
   ORDER_ASC
   ORDER_DESC
+  CORE_ID_ASC
+  CORE_ID_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -1091,6 +1191,9 @@ type EditorialCategory implements Node & Teaser {
   image: ImageType
   sophoraId: String
   order: Int
+
+  """URN of this page, generated from its external ID by Sophora."""
+  coreId: String
 
   """Reads and enables pagination through a set of `Item`."""
   items(
@@ -1113,7 +1216,7 @@ type EditorialCategory implements Node & Teaser {
     after: Cursor
 
     """The method to use when ordering `Item`."""
-    orderBy: [ItemsOrderBy!] = [PRIMARY_KEY_ASC]
+    orderBy: [ItemsOrderBy!] = [ORDER_ASC, PUBLISH_DATE_DESC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -1300,11 +1403,11 @@ type EditorialCategory implements Node & Teaser {
   sharingUrl: URL
   path: String
   url(variant: UrlVariant): String
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   id: ID!
   synopsis: String
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "workaround for old query, use teasers.editorialDescription instead of nodes")
   numberOfElements: Int
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -1328,6 +1431,9 @@ input EditorialCategoryCondition {
 
   """Checks for equality with the object’s `order` field."""
   order: Int
+
+  """Checks for equality with the object’s `coreId` field."""
+  coreId: String
 }
 
 """
@@ -1345,6 +1451,9 @@ input EditorialCategoryFilter {
 
   """Filter by the object’s `order` field."""
   order: IntFilter
+
+  """Filter by the object’s `coreId` field."""
+  coreId: StringFilter
 
   """Filter by the object’s `image` field."""
   image: ImageTypeFilter
@@ -1399,14 +1508,17 @@ type EditorialCollection implements Node & Teaser {
   numberOfElements: Int
   synopsis: String
   coremediaId: String
+
+  """URN of this page, generated from its external ID by Sophora."""
+  coreId: String
   rowId: ID!
   sharingUrl: URL
   path: String
   url(variant: UrlVariant): String
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   id: ID!
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "workaround for old query, use teasers.editorialDescription instead of nodes")
   summary: String
   _raw: JSON @deprecated(reason: "only for internal debugging")
   items(offset: Int, limit: Int): ItemsConnection!
@@ -1437,6 +1549,9 @@ input EditorialCollectionCondition {
 
   """Checks for equality with the object’s `coremediaId` field."""
   coremediaId: String
+
+  """Checks for equality with the object’s `coreId` field."""
+  coreId: String
 }
 
 """
@@ -1461,6 +1576,9 @@ input EditorialCollectionFilter {
   """Filter by the object’s `coremediaId` field."""
   coremediaId: StringFilter
 
+  """Filter by the object’s `coreId` field."""
+  coreId: StringFilter
+
   """Filter by the object’s `image` field."""
   image: ImageTypeFilter
 
@@ -1483,6 +1601,8 @@ type EditorialCollectionsConnection {
   edges: [EditorialCollectionsEdge!]!
   pageInfo: PageInfo
   totalCount: Int!
+  tracking: JSON
+  title: String
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -1494,11 +1614,12 @@ type EditorialCollectionSection implements Section {
   type: String
   layout: JSON
   tracking: JSON
-  nodes(limit: Int, offset: Int = 0): [EditorialCollection!]
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserType: String @deprecated(reason: "WIP")
-  teaserTypes: [String!] @deprecated(reason: "WIP")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [EditorialCollection!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
   editorialCollections: [EditorialCollection!] @deprecated(reason: "only for backwards compatibility")
 }
 
@@ -1528,6 +1649,8 @@ enum EditorialCollectionsOrderBy {
   SYNOPSIS_DESC
   COREMEDIA_ID_ASC
   COREMEDIA_ID_DESC
+  CORE_ID_ASC
+  CORE_ID_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -1574,6 +1697,8 @@ type EndUser implements EndUserInterface {
 
   """ initial sync after first login was completed successfully () """
   syncSuccessful: Boolean
+  tracking(v: TrackingVariant): JSON
+  downloads: DownloadList!
 }
 
 """ This is a generated connection for EndUser """
@@ -1680,6 +1805,8 @@ interface EndUserInterface {
 
   """ initial sync after first login was completed successfully () """
   syncSuccessful: Boolean
+  tracking(v: TrackingVariant): JSON
+  downloads: DownloadList!
 }
 
 """ The payload returned from mutations of EndUser. """
@@ -1757,20 +1884,32 @@ input EndUserUpdateInput {
   syncSuccessful: Boolean
 }
 
-type EventLivestream implements Teaser & CoreTeaser {
+interface Error {
+  message: String!
+  id: ID!
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+}
+
+type EventLivestream implements ItemInterface & CoreAsset & Teaser & CoreTeaser {
   id: ID!
   coreId: String
+  assetId: String
+  fusionId: String
   coreType: ItemType! @deprecated(reason: "use itemType")
   itemType: ItemType!
-  rowId: Int!
+  rowId: Int! @deprecated(reason: "use id")
   externalIds: [String]
   title: String!
   image: ImageType
+  startDate: Datetime
+  endDate: Datetime
   publishDate: Datetime!
+  isPublished: Boolean
   broadcastStart: Datetime!
+  broadcastEnd: Datetime!
   duration(variant: DurationVariant): Int
   programSet: ProgramSet
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "experimental, use teasers.editorialDescription instead of nodes")
 
   """same as summary"""
   synopsis: String
@@ -1785,10 +1924,58 @@ type EventLivestream implements Teaser & CoreTeaser {
   sharingUrl: URL
   url(variant: UrlVariant): String
   path: String
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   coreDocument: JSON
   core(filter: String, key: String): JSON
   numberOfElements: Int @deprecated(reason: "is always null")
+  mediaCollection(v: MediaCollectionVariant): JSON
+  _links: JSON @deprecated(reason: "only for old / hal-json queries")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+}
+
+type EventLivestreamConnection {
+  count: Int
+  nodes: [EventLivestream]
+  pageInfo: PageInfo!
+}
+
+type Extra implements ItemInterface & CoreAsset & Teaser & CoreTeaser {
+  id: ID!
+  coreId: String
+  assetId: String
+  fusionId: String
+  coreType: ItemType! @deprecated(reason: "use itemType")
+  itemType: ItemType!
+  rowId: Int! @deprecated(reason: "use id")
+  externalIds: [String]
+  title: String!
+  image: ImageType
+  startDate: Datetime
+  endDate: Datetime
+  publishDate: Datetime!
+  isPublished: Boolean
+  duration(variant: DurationVariant): Int
+  programSet: ProgramSet
+  editorialDescription: String @deprecated(reason: "experimental, use teasers.editorialDescription instead of nodes")
+
+  """same as summary"""
+  synopsis: String
+
+  """same as synopsis"""
+  summary: String
+
+  """longer description / show notes"""
+  description: HTML
+  audios: [AssetType!]
+  audioList: [AudioBinary!]
+  sharingUrl: URL
+  url(variant: UrlVariant): String
+  path: String
+  tracking(v: TrackingVariant): JSON
+  coreDocument: JSON
+  core(filter: String, key: String): JSON
+  numberOfElements: Int @deprecated(reason: "is always null")
+  mediaCollection(v: MediaCollectionVariant): JSON
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -1801,13 +1988,16 @@ type FilterCompilationSection implements Section {
   key: String @deprecated(reason: "only for internal use")
   type: String
   layout: JSON
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserType: String @deprecated(reason: "WIP")
-  teaserTypes: [String!] @deprecated(reason: "WIP")
-  nodes(limit: Int, offset: Int = 0, source: SourceSystem): [Teaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
+  nodes(limit: Int, offset: Int = 0, source: SourceSystem, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
   _items: JSON @deprecated(reason: "only for internal stiching/debugging")
   _raw: JSON @deprecated(reason: "only for internal debugging")
+  _rawARS: JSON @deprecated(reason: "only for internal debugging")
+  errors: JSON
 }
 
 input FloatFilterB {
@@ -1840,6 +2030,60 @@ input FloatFilterB {
   lte: Float
 }
 
+type GroupedShow {
+  sophoraId: String
+  title: String
+  tracking: JSON
+  shows: [ProgramSet]
+  id: ID
+}
+
+"""
+A filter to be used against `GroupedShow` object types. All fields are combined with a logical ‘and.’
+"""
+input GroupedShowFilter {
+  """Filter by the object’s `sophoraId` field."""
+  sophoraId: StringFilter
+
+  """Filter by the object’s `title` field."""
+  title: StringFilter
+
+  """Checks for all expressions in this list."""
+  and: [GroupedShowFilter!]
+
+  """Checks for any expressions in this list."""
+  or: [GroupedShowFilter!]
+
+  """Negates the expression."""
+  not: GroupedShowFilter
+}
+
+"""A connection to a list of `GroupedShow` values."""
+type GroupedShowsConnection {
+  """A list of `GroupedShow` objects."""
+  nodes: [GroupedShow!]!
+
+  """
+  A list of edges which contains the `GroupedShow` and cursor to aid in pagination.
+  """
+  edges: [GroupedShowsEdge!]!
+
+  """Information to aid in pagination."""
+  pageInfo: PageInfo!
+
+  """The count of *all* `GroupedShow` you could get from the connection."""
+  totalCount: Int!
+}
+
+"""A `GroupedShow` edge in the connection."""
+type GroupedShowsEdge {
+  """A cursor for use in pagination."""
+  cursor: Cursor
+
+  """The `GroupedShow` at the end of the edge."""
+  node: GroupedShow!
+}
+
 type Grouping implements Node {
   """
   A globally unique identifier. Can be used in various places throughout the system to identify this single value.
@@ -1856,12 +2100,10 @@ type Grouping implements Node {
   coreId: String
   coreDocument: JSON
   showId: String
+  comment: String
 
   """Reads a single `ProgramSet` that is related to this `Grouping`."""
   programset: ProgramSet
-
-  """Reads a single `ProgramSet` that is related to this `Grouping`."""
-  show: ProgramSet
 
   """Reads and enables pagination through a set of `Item`."""
   itemsByGroupId(
@@ -1884,7 +2126,7 @@ type Grouping implements Node {
     after: Cursor
 
     """The method to use when ordering `Item`."""
-    orderBy: [ItemsOrderBy!] = [PRIMARY_KEY_ASC]
+    orderBy: [ItemsOrderBy!] = [ORDER_ASC, PUBLISH_DATE_DESC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -1935,6 +2177,9 @@ input GroupingCondition {
 
   """Checks for equality with the object’s `showId` field."""
   showId: String
+
+  """Checks for equality with the object’s `comment` field."""
+  comment: String
 }
 
 """
@@ -1973,6 +2218,9 @@ input GroupingFilter {
 
   """Filter by the object’s `showId` field."""
   showId: StringFilter
+
+  """Filter by the object’s `comment` field."""
+  comment: StringFilter
 
   """Checks for all expressions in this list."""
   and: [GroupingFilter!]
@@ -2035,6 +2283,8 @@ enum GroupingsOrderBy {
   CORE_DOCUMENT_DESC
   SHOW_ID_ASC
   SHOW_ID_DESC
+  COMMENT_ASC
+  COMMENT_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -2123,6 +2373,7 @@ type HistoryEntryConnection {
   edges: [HistoryEntryEdge]
   nodes: [HistoryEntryInterface]
   pageInfo: PageInfo!
+  tracking(v: TrackingVariant): JSON
 }
 
 input HistoryEntryConnectionFilterB {
@@ -2331,13 +2582,17 @@ type ImagesCollectionsBinariesView {
   imageCollectionId: String
   imageId: String
   title: String
+  alt: String
   producerName: String
+  artworkType: String
+  isBranded: Boolean
   imageBinaryId: String
   aspectRatio: String
   height: Int
   width: Int
   mediaType: String
   fileLocation: String
+  coreDocument: JSON
   url: String!
 }
 
@@ -2355,8 +2610,17 @@ input ImagesCollectionsBinariesViewCondition {
   """Checks for equality with the object’s `title` field."""
   title: String
 
+  """Checks for equality with the object’s `alt` field."""
+  alt: String
+
   """Checks for equality with the object’s `producerName` field."""
   producerName: String
+
+  """Checks for equality with the object’s `artworkType` field."""
+  artworkType: String
+
+  """Checks for equality with the object’s `isBranded` field."""
+  isBranded: Boolean
 
   """Checks for equality with the object’s `imageBinaryId` field."""
   imageBinaryId: String
@@ -2375,6 +2639,9 @@ input ImagesCollectionsBinariesViewCondition {
 
   """Checks for equality with the object’s `fileLocation` field."""
   fileLocation: String
+
+  """Checks for equality with the object’s `coreDocument` field."""
+  coreDocument: JSON
 }
 
 """
@@ -2390,8 +2657,17 @@ input ImagesCollectionsBinariesViewFilter {
   """Filter by the object’s `title` field."""
   title: StringFilter
 
+  """Filter by the object’s `alt` field."""
+  alt: StringFilter
+
   """Filter by the object’s `producerName` field."""
   producerName: StringFilter
+
+  """Filter by the object’s `artworkType` field."""
+  artworkType: StringFilter
+
+  """Filter by the object’s `isBranded` field."""
+  isBranded: BooleanFilter
 
   """Filter by the object’s `imageBinaryId` field."""
   imageBinaryId: StringFilter
@@ -2410,6 +2686,9 @@ input ImagesCollectionsBinariesViewFilter {
 
   """Filter by the object’s `fileLocation` field."""
   fileLocation: StringFilter
+
+  """Filter by the object’s `coreDocument` field."""
+  coreDocument: JSONFilter
 
   """Checks for all expressions in this list."""
   and: [ImagesCollectionsBinariesViewFilter!]
@@ -2458,8 +2737,14 @@ enum ImagesCollectionsBinariesViewsOrderBy {
   IMAGE_ID_DESC
   TITLE_ASC
   TITLE_DESC
+  ALT_ASC
+  ALT_DESC
   PRODUCER_NAME_ASC
   PRODUCER_NAME_DESC
+  ARTWORK_TYPE_ASC
+  ARTWORK_TYPE_DESC
+  IS_BRANDED_ASC
+  IS_BRANDED_DESC
   IMAGE_BINARY_ID_ASC
   IMAGE_BINARY_ID_DESC
   ASPECT_RATIO_ASC
@@ -2472,6 +2757,8 @@ enum ImagesCollectionsBinariesViewsOrderBy {
   MEDIA_TYPE_DESC
   FILE_LOCATION_ASC
   FILE_LOCATION_DESC
+  CORE_DOCUMENT_ASC
+  CORE_DOCUMENT_DESC
 }
 
 type ImageType {
@@ -2587,7 +2874,7 @@ input IntFilterB {
   lte: Int
 }
 
-type Item implements Node & Teaser & CoreTeaser {
+type Item implements Node & ItemInterface & CoreAsset & Teaser & CoreTeaser {
   rowId: Int!
 
   """
@@ -2615,12 +2902,23 @@ type Item implements Node & Teaser & CoreTeaser {
   coreId: String
   itemType: ItemType!
   coreDocument: JSON
+
+  """external ID of the primary audio binary"""
   externalId: String
   imageCollectionId: String
   showId: String
   firstPublishDate: Datetime
   audioBinaryId: String
   status: Status
+  order: Int
+
+  """
+  ID of the base asset of this item, e.g. the episode ID if the item is an episode
+  """
+  assetId: String
+
+  """ID of the fusion topic message for this item"""
+  fusionId: String
 
   """Reads a single `ProgramSet` that is related to this `Item`."""
   programSet: ProgramSet
@@ -2630,6 +2928,9 @@ type Item implements Node & Teaser & CoreTeaser {
 
   """Reads a single `EditorialCategory` that is related to this `Item`."""
   editorialCategory: EditorialCategory
+
+  """Reads a single `ProgramSet` that is related to this `Item`."""
+  show: ProgramSet
 
   """Reads and enables pagination through a set of `Concept`."""
   concepts(
@@ -2731,7 +3032,7 @@ type Item implements Node & Teaser & CoreTeaser {
     A filter to be used in determining which values should be returned by the collection.
     """
     filter: EditorialCategoryFilter
-  ): [EditorialCategory!]
+  ): [EditorialCategory!]!
   hasCoreDocument: Boolean
   hasSyntheticRowId: Boolean
 
@@ -2769,6 +3070,15 @@ type Item implements Node & Teaser & CoreTeaser {
     offset: Int
   ): [ImagesCollectionsBinariesView!]
   nextEpisode: Item
+
+  """Reads and enables pagination through a set of `Item`."""
+  nextEpisodesList(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Skip the first `n` values."""
+    offset: Int
+  ): [Item!]
   coreType: ItemType! @deprecated(reason: "use itemType")
   titleClean: String
   synopsis: String
@@ -2777,7 +3087,7 @@ type Item implements Node & Teaser & CoreTeaser {
   duration(variant: DurationVariant): Int
   groupNumber: Int @deprecated(reason: "use episodeNumber")
   grouping: JSON
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON @deprecated(reason: "only for backward compability")
   audios: [AssetType!]
   sharingUrl: URL
@@ -2786,20 +3096,24 @@ type Item implements Node & Teaser & CoreTeaser {
   tags: JSON @deprecated(reason: "use keywords instead")
   keywords: JSON
   subjects: JSON
+  startDate: Datetime
+  endDate: Datetime
   id: ID!
   _raw: JSON @deprecated(reason: "only for internal debugging")
   node: Teaser @deprecated(reason: "WIP")
   item: Item @deprecated(reason: "WIP")
 
-  """ mediumTitle from Sophora MeCu API, used as `Kurzbeschreibung` only avaliable when item is requested via Board/Teaser
+  """
+  mediumTitle from Sophora MeCu API, used as `Kurzbeschreibung` only avaliable when item is requested via Board/Teaser
   """
   editorialDescription: String
   numberOfElements: Int @deprecated(reason: "is always null for items")
   publicationStartDateAndTime: Datetime @deprecated(reason: "only for old / hal-json queries")
-  recommendations(variant: ItemRecVariant!): RecommendationsConnection
+  recommendations(variant: ItemRecVariant!, abGroup: String, limit: Int, offset: Int): RecommendationsConnection
   core(filter: String, key: String): JSON
   feed(filter: String, key: String): JSON @deprecated(reason: "from meta export feed")
   backend(filter: String, key: String): JSON @deprecated(reason: "from old CoreMedia Backend API")
+  mediaCollection(v: MediaCollectionVariant): JSON
 }
 
 """
@@ -2889,6 +3203,15 @@ input ItemCondition {
 
   """Checks for equality with the object’s `status` field."""
   status: Status
+
+  """Checks for equality with the object’s `order` field."""
+  order: Int
+
+  """Checks for equality with the object’s `assetId` field."""
+  assetId: String
+
+  """Checks for equality with the object’s `fusionId` field."""
+  fusionId: String
 }
 
 """ This is a generated connection for Item """
@@ -2897,11 +3220,18 @@ type ItemConnection {
   edges: [ItemEdge]
   nodes: [Item]
   pageInfo: PageInfo!
+  tracking(v: TrackingVariant): JSON
 }
 
 input ItemConnectionFilterB {
+  """ Filter by values of property assetId """
+  assetId: StringFilterB
+
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
 
   """ A filter that matches empty connections. """
   empty: BooleanFilterB
@@ -2912,9 +3242,17 @@ input ItemCreateInput {
   """ The type of the created object. Defaults to Item """
   type: String = "Item"
 
-  """ Item ID (de: (CoreMedia-)ID der Entity, en: ID of the entity (in CoreMedia)) 
+  """ Asset URN e.g. `urn:ard:episode:abcdef` (de: Asset URN des referenzierten Items, en: Asset URN of the referenced item) 
   """
-  id: Int!
+  assetId: String
+
+  """ Core ID e.g. `urn:ard:publication:abcdef` (de: URN des referenzierten Entity, en: URN of the referenced entity) 
+  """
+  coreId: String
+
+  """ Item ID (de: ID des referenzierten Entity, en: ID of the referenced entity) 
+  """
+  id: ID!
 }
 
 """  This is a generated edge for Item """
@@ -3008,6 +3346,15 @@ input ItemFilter {
   """Filter by the object’s `status` field."""
   status: StatusFilter
 
+  """Filter by the object’s `order` field."""
+  order: IntFilter
+
+  """Filter by the object’s `assetId` field."""
+  assetId: StringFilter
+
+  """Filter by the object’s `fusionId` field."""
+  fusionId: StringFilter
+
   """Filter by the object’s `image` field."""
   image: ImageTypeFilter
 
@@ -3022,8 +3369,54 @@ input ItemFilter {
 }
 
 input ItemFilterB {
+  """ Filter by values of property assetId """
+  assetId: StringFilterB
+
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
+}
+
+interface ItemInterface {
+  id: ID!
+  coreId: String
+  assetId: String
+  fusionId: String
+  itemType: ItemType!
+  rowId: Int! @deprecated(reason: "use id")
+  externalIds: [String]
+  title: String!
+  image: ImageType
+  startDate: Datetime
+  endDate: Datetime
+  publishDate: Datetime!
+  isPublished: Boolean
+  duration(variant: DurationVariant): Int
+  programSet: ProgramSet
+  editorialDescription: String @deprecated(reason: "experimental, use teasers.editorialDescription instead of nodes")
+
+  """same as summary"""
+  synopsis: String
+
+  """same as synopsis"""
+  summary: String
+
+  """longer description / show notes"""
+  description: HTML
+  audios: [AssetType!]
+  audioList: [AudioBinary!]
+  sharingUrl: URL
+  url(variant: UrlVariant): String
+  path: String
+  tracking(v: TrackingVariant): JSON
+  coreDocument: JSON
+  core(filter: String, key: String): JSON
+  numberOfElements: Int @deprecated(reason: "is always null")
+  mediaCollection(v: MediaCollectionVariant): JSON
+  _links: JSON @deprecated(reason: "only for old / hal-json queries")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
 }
 
 enum ItemRecVariant {
@@ -3033,8 +3426,14 @@ enum ItemRecVariant {
 }
 
 input ItemRelationFilterB {
+  """ Filter by values of property assetId """
+  assetId: StringFilterB
+
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
 }
 
 """A connection to a list of `Item` values."""
@@ -3052,6 +3451,7 @@ type ItemsConnection {
 
   """The count of *all* `Item` you could get from the connection."""
   totalCount: Int!
+  tracking(v: TrackingVariant): JSON
 }
 
 type ItemSection implements Section {
@@ -3061,11 +3461,12 @@ type ItemSection implements Section {
   type: String
   layout: JSON
   tracking: JSON
-  nodes(limit: Int, offset: Int = 0): [Item!]
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserType: String @deprecated(reason: "WIP")
-  teaserTypes: [String!] @deprecated(reason: "WIP")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Item!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
   items: [Item!] @deprecated(reason: "only for backwards compatibility")
 }
 
@@ -3137,6 +3538,12 @@ enum ItemsOrderBy {
   AUDIO_BINARY_ID_DESC
   STATUS_ASC
   STATUS_DESC
+  ORDER_ASC
+  ORDER_DESC
+  ASSET_ID_ASC
+  ASSET_ID_DESC
+  FUSION_ID_ASC
+  FUSION_ID_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -3147,9 +3554,11 @@ enum ItemSortOrder {
 }
 
 type ItemsSearchConnection {
+  title: String!
   pageInfo: PageInfo
   totalCount: Int!
-  nodes: [Item!]!
+  tracking: JSON
+  nodes: [ItemInterface!]!
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -3278,100 +3687,20 @@ input JSONFilter {
   containedBy: JSON
 }
 
-type Migration implements Node {
-  """
-  A globally unique identifier. Can be used in various places throughout the system to identify this single value.
-  """
-  nodeId: ID!
-  rowId: Int!
-  name: String!
-  hash: String!
-  executedAt: Datetime
+type Link {
+  label: String
+  url: String
 }
 
-"""
-A condition to be used against `Migration` object types. All fields are tested
-for equality and combined with a logical ‘and.’
-"""
-input MigrationCondition {
-  """Checks for equality with the object’s `id` field."""
-  id: Int
-
-  """Checks for equality with the object’s `name` field."""
-  name: String
-
-  """Checks for equality with the object’s `hash` field."""
-  hash: String
-
-  """Checks for equality with the object’s `executedAt` field."""
-  executedAt: Datetime
+"""An input for mutations affecting `Link`"""
+input LinkInput {
+  label: String
+  url: String
 }
 
-"""
-A filter to be used against `Migration` object types. All fields are combined with a logical ‘and.’
-"""
-input MigrationFilter {
-  """Filter by the object’s `id` field."""
-  id: IntFilter
-
-  """Filter by the object’s `name` field."""
-  name: StringFilter
-
-  """Filter by the object’s `hash` field."""
-  hash: StringFilter
-
-  """Filter by the object’s `executedAt` field."""
-  executedAt: DatetimeFilter
-
-  """Checks for all expressions in this list."""
-  and: [MigrationFilter!]
-
-  """Checks for any expressions in this list."""
-  or: [MigrationFilter!]
-
-  """Negates the expression."""
-  not: MigrationFilter
-}
-
-"""A connection to a list of `Migration` values."""
-type MigrationsConnection {
-  """A list of `Migration` objects."""
-  nodes: [Migration!]!
-
-  """
-  A list of edges which contains the `Migration` and cursor to aid in pagination.
-  """
-  edges: [MigrationsEdge!]!
-
-  """Information to aid in pagination."""
-  pageInfo: PageInfo!
-
-  """The count of *all* `Migration` you could get from the connection."""
-  totalCount: Int!
-}
-
-"""A `Migration` edge in the connection."""
-type MigrationsEdge {
-  """A cursor for use in pagination."""
-  cursor: Cursor
-
-  """The `Migration` at the end of the edge."""
-  node: Migration!
-}
-
-"""Methods to use when ordering `Migration`."""
-enum MigrationsOrderBy {
-  NATURAL
-  ID_ASC
-  ID_DESC
-  NAME_ASC
-  NAME_DESC
-  HASH_ASC
-  HASH_DESC
-  EXECUTED_AT_ASC
-  EXECUTED_AT_DESC
-  PRIMARY_KEY_ASC
-  PRIMARY_KEY_DESC
+enum MediaCollectionVariant {
+  V6
+  V6A
 }
 
 """
@@ -3388,6 +3717,9 @@ type Mutation {
   """ Mutation to synchronize the user data. """
   syncUserData(input: EndUserSyncInput): EndUserPayload
 
+  """ Mutation to merge local user data into the data of an existing user. """
+  mergeUserData(input: EndUserSyncInput): EndUserPayload
+
   """ Update a Bookmark object. """
   updateBookmark(input: BookmarkUpdateInput!): BookmarkPayload
 
@@ -3401,13 +3733,13 @@ type Mutation {
   removeAllEntriesFromBookmarkList(input: BookmarkListRemoveAllListInput!): BookmarkListPayload
 
   """ Create a new EndUser object. """
-  createEndUser(input: EndUserCreateInput!): EndUserPayload
+  createEndUser(input: EndUserCreateInput!): EndUserPayload @deprecated
 
   """ Upsert a EndUser object. """
-  upsertEndUser(input: EndUserCreateInput!): EndUserPayload
+  upsertEndUser(input: EndUserCreateInput!): EndUserPayload @deprecated
 
   """ Update a EndUser object. """
-  updateEndUser(input: EndUserUpdateInput!): EndUserPayload
+  updateEndUser(input: EndUserUpdateInput!): EndUserPayload @deprecated
 
   """ Create a new HistoryEntry object. """
   createHistoryEntry(input: HistoryEntryCreateInput!): HistoryEntryPayload
@@ -3431,19 +3763,19 @@ type Mutation {
   updateProgramSetSubscription(input: ProgramSetSubscriptionUpdateInput!): ProgramSetSubscriptionPayload
 
   """ Create a new Property object. """
-  createProperty(input: PropertyCreateInput!): PropertyPayload
+  createProperty(input: PropertyCreateInput!): PropertyPayload @deprecated
 
   """ Update a Property object. """
-  updateProperty(input: PropertyUpdateInput!): PropertyPayload
+  updateProperty(input: PropertyUpdateInput!): PropertyPayload @deprecated
 
   """ Create a new Queue object. """
-  createQueue(input: QueueCreateInput!): QueuePayload
+  createQueue(input: QueueCreateInput!): QueuePayload @deprecated
 
   """ Update a Queue object. """
-  updateQueue(input: QueueUpdateInput!): QueuePayload
-  addEntryToQueue(input: QueueEntryListInput!): QueuePayload
-  removeEntryFromQueue(input: QueueEntryListInput!): QueuePayload
-  removeAllEntriesFromQueue(input: QueueRemoveAllListInput!): QueuePayload
+  updateQueue(input: QueueUpdateInput!): QueuePayload @deprecated
+  addEntryToQueue(input: QueueEntryListInput!): QueuePayload @deprecated
+  removeEntryFromQueue(input: QueueEntryListInput!): QueuePayload @deprecated
+  removeAllEntriesFromQueue(input: QueueRemoveAllListInput!): QueuePayload @deprecated
 
   """ Create a new SubscriptionList object. """
   createSubscriptionList(input: SubscriptionListCreateInput!): SubscriptionListPayload
@@ -3467,6 +3799,23 @@ interface Node {
   A globally unique identifier. Can be used in various places throughout the system to identify this single value.
   """
   nodeId: ID!
+}
+
+"""Error Type for Preview Mode"""
+type NotFound implements Teaser & Error {
+  id: ID!
+  message: String!
+  title: String!
+  synopsis: String
+  editorialDescription: String
+  image: ImageType
+  url(variant: UrlVariant): String
+  sharingUrl: URL
+  path: String
+  numberOfElements: Int
+  tracking(v: TrackingVariant): JSON
+  _links: JSON @deprecated(reason: "only for old / hal-json queries")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
 }
 
 type Organization implements Node {
@@ -3502,7 +3851,7 @@ type Organization implements Node {
     after: Cursor
 
     """The method to use when ordering `PublicationService`."""
-    orderBy: [PublicationServicesOrderBy!] = [ORDER_ASC]
+    orderBy: [PublicationServicesOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -3585,7 +3934,7 @@ type Organization implements Node {
   sharingUrl: URL
   path: String
   url(variant: UrlVariant): String
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON
   image(aspect: AspectRatio): ImageType
 }
@@ -3662,7 +4011,8 @@ type OrganizationsConnection {
   """The count of *all* `Organization` you could get from the connection."""
   totalCount: Int!
   _links: JSON
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
+  sharingUrl: String
 }
 
 """A `Organization` edge in the connection."""
@@ -3708,7 +4058,7 @@ type PageInfo {
   endCursor: Cursor
 }
 
-type PermanentLivestream implements Node & CoreTeaser {
+type PermanentLivestream implements Node & CoreAsset & CoreTeaser {
   """
   A globally unique identifier. Can be used in various places throughout the system to identify this single value.
   """
@@ -3721,12 +4071,14 @@ type PermanentLivestream implements Node & CoreTeaser {
   image: ImageType
   coreDocument: JSON
   stream: JSON @deprecated(reason: "only for old / hal-json queries")
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   audios: [StreamType!]
   imageCollectionId: String
-  audioBinaryId: String
+  audioBinaryId: String @deprecated(reason: "out of life")
   publisherCoreId: String
   order: Int
+  current: JSON
+  next: JSON
 
   """
   Reads a single `PublicationService` that is related to this `PermanentLivestream`.
@@ -3775,11 +4127,17 @@ type PermanentLivestream implements Node & CoreTeaser {
     """Skip the first `n` values."""
     offset: Int
   ): [ImagesCollectionsBinariesView!]
+  sharingUrl: URL
+  embedUrl: URL
+  path: String
+  url(variant: UrlVariant): String
   id: ID!
   summary: String
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "experimental, use teasers.editorialDescription instead of nodes")
   description: HTML
   _raw: JSON @deprecated(reason: "only for internal debugging")
+  core(filter: String, key: String): JSON
+  mediaCollection(v: MediaCollectionVariant): JSON
 }
 
 """
@@ -3828,6 +4186,12 @@ input PermanentLivestreamCondition {
 
   """Checks for equality with the object’s `order` field."""
   order: Int
+
+  """Checks for equality with the object’s `current` field."""
+  current: JSON
+
+  """Checks for equality with the object’s `next` field."""
+  next: JSON
 }
 
 """
@@ -3900,6 +4264,9 @@ type PermanentLivestreamsConnection {
   The count of *all* `PermanentLivestream` you could get from the connection.
   """
   totalCount: Int!
+  id: ID
+  title: String
+  tracking(v: TrackingVariant): JSON
 }
 
 """A `PermanentLivestream` edge in the connection."""
@@ -3942,6 +4309,10 @@ enum PermanentLivestreamsOrderBy {
   PUBLISHER_CORE_ID_DESC
   ORDER_ASC
   ORDER_DESC
+  CURRENT_ASC
+  CURRENT_DESC
+  NEXT_ASC
+  NEXT_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -3981,6 +4352,7 @@ type Playlist implements PlaylistInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ This is a generated connection for Playlist """
@@ -3989,6 +4361,7 @@ type PlaylistConnection {
   edges: [PlaylistEdge]
   nodes: [PlaylistInterface]
   pageInfo: PageInfo!
+  tracking(v: TrackingVariant): JSON
 }
 
 input PlaylistConnectionFilterB {
@@ -4091,6 +4464,7 @@ interface PlaylistInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ The payload returned from mutations of Playlist. """
@@ -4165,6 +4539,7 @@ input PlaylistUpdateInput {
 }
 
 type ProgramSet implements Node & Teaser & CoreTeaser {
+  coreId: String
   rowId: Int!
 
   """
@@ -4177,7 +4552,6 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
   numberOfElements: Int
   image: ImageType
   editorialCategoryId: String
-  coreId: String
   coreDocument: JSON
   imageCollectionId: String
 
@@ -4186,8 +4560,15 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
   """
   lastItemModified: Datetime
 
+  """public RSS Feed URL"""
+  feedUrl2: String
+
   """gets updated when items are added to the programset"""
   lastItemAdded: Datetime
+
+  """public RSS Feed URL"""
+  feedUrl: String
+  externalId: String
 
   """
   Reads a single `PublicationService` that is related to this `ProgramSet`.
@@ -4215,7 +4596,7 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
     after: Cursor
 
     """The method to use when ordering `Item`."""
-    orderBy: [ItemsOrderBy!] = [PRIMARY_KEY_ASC]
+    orderBy: [ItemsOrderBy!] = [ORDER_ASC, PUBLISH_DATE_DESC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -4228,8 +4609,8 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
     filter: ItemFilter
   ): ItemsConnection!
 
-  """Reads and enables pagination through a set of `Grouping`."""
-  groupingsByProgramsetId(
+  """Reads and enables pagination through a set of `Item`."""
+  itemsByShowId(
     """Only read the first `n` values of the set."""
     first: Int
 
@@ -4248,22 +4629,22 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
     """Read all values in the set after (below) this cursor."""
     after: Cursor
 
-    """The method to use when ordering `Grouping`."""
-    orderBy: [GroupingsOrderBy!] = [PRIMARY_KEY_ASC]
+    """The method to use when ordering `Item`."""
+    orderBy: [ItemsOrderBy!] = [ORDER_ASC, PUBLISH_DATE_DESC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
     """
-    condition: GroupingCondition
+    condition: ItemCondition
 
     """
     A filter to be used in determining which values should be returned by the collection.
     """
-    filter: GroupingFilter
-  ): GroupingsConnection!
+    filter: ItemFilter
+  ): ItemsConnection!
 
   """Reads and enables pagination through a set of `Grouping`."""
-  groupingsByShowId(
+  groupingsByProgramsetId(
     """Only read the first `n` values of the set."""
     first: Int
 
@@ -4356,6 +4737,8 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
     filter: CategoriesToProgramSetFilter
   ): [CategoriesToProgramSet!]!
   editorialCategory: EditorialCategory
+  eventLivestreams(after: Cursor, before: Cursor, condition: ItemCondition, filter: ItemFilter, first: Int, last: Int, offset: Int, orderBy: [ItemsOrderBy!]): EventLivestreamConnection
+  eventLivestreamsList(condition: ItemCondition, filter: ItemFilter, first: Int, offset: Int, orderBy: [ItemsOrderBy!]): [EventLivestream!]
 
   """
   Reads and enables pagination through a set of `ImagesCollectionsBinariesView`.
@@ -4412,7 +4795,7 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
     after: Cursor
 
     """The method to use when ordering `EditorialCategory`."""
-    orderBy: [EditorialCategoriesOrderBy!] = [ORDER_ASC]
+    orderBy: [EditorialCategoriesOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -4451,11 +4834,11 @@ type ProgramSet implements Node & Teaser & CoreTeaser {
   path: String
   url(variant: UrlVariant): String
   sharingUrl: URL
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON
   id: ID!
   core(filter: String, key: String): JSON
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "workaround for old query, use teasers.editorialDescription instead of nodes")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
 
@@ -4497,8 +4880,17 @@ input ProgramSetCondition {
   """Checks for equality with the object’s `lastItemModified` field."""
   lastItemModified: Datetime
 
+  """Checks for equality with the object’s `feedUrl2` field."""
+  feedUrl2: String
+
   """Checks for equality with the object’s `lastItemAdded` field."""
   lastItemAdded: Datetime
+
+  """Checks for equality with the object’s `feedUrl` field."""
+  feedUrl: String
+
+  """Checks for equality with the object’s `externalId` field."""
+  externalId: String
 }
 
 """ This is a generated connection for ProgramSet """
@@ -4510,8 +4902,11 @@ type ProgramSetConnection {
 }
 
 input ProgramSetConnectionFilterB {
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
 
   """ A filter that matches empty connections. """
   empty: BooleanFilterB
@@ -4522,9 +4917,13 @@ input ProgramSetCreateInput {
   """ The type of the created object. Defaults to ProgramSet """
   type: String = "ProgramSet"
 
-  """ Item ID (de: (CoreMedia-)ID der Entity, en: ID of the entity (in CoreMedia)) 
+  """ Core ID e.g. `urn:ard:show:abcdef` (de: URN des referenzierten Entity, en: URN of the referenced entity) 
   """
-  id: Int!
+  coreId: String
+
+  """ Item ID (de: ID des referenzierten Entity, en: ID of the referenced entity) 
+  """
+  id: ID!
 }
 
 """  This is a generated edge for ProgramSet """
@@ -4600,8 +4999,17 @@ input ProgramSetFilter {
   """Filter by the object’s `lastItemModified` field."""
   lastItemModified: DatetimeFilter
 
+  """Filter by the object’s `feedUrl2` field."""
+  feedUrl2: StringFilter
+
   """Filter by the object’s `lastItemAdded` field."""
   lastItemAdded: DatetimeFilter
+
+  """Filter by the object’s `feedUrl` field."""
+  feedUrl: StringFilter
+
+  """Filter by the object’s `externalId` field."""
+  externalId: StringFilter
 
   """Filter by the object’s `image` field."""
   image: ImageTypeFilter
@@ -4617,13 +5025,19 @@ input ProgramSetFilter {
 }
 
 input ProgramSetFilterB {
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
 }
 
 input ProgramSetRelationFilterB {
+  """ Filter by values of property coreId """
+  coreId: StringFilterB
+
   """ Filter by values of property id """
-  id: IntFilterB
+  id: IDFilterB
 }
 
 """A connection to a list of `ProgramSet` values."""
@@ -4641,6 +5055,9 @@ type ProgramSetsConnection {
 
   """The count of *all* `ProgramSet` you could get from the connection."""
   totalCount: Int!
+  id: ID
+  title: String
+  tracking(v: TrackingVariant): JSON
 }
 
 type ProgramSetSection implements Section {
@@ -4650,11 +5067,12 @@ type ProgramSetSection implements Section {
   type: String
   layout: JSON
   tracking: JSON
-  nodes(limit: Int, offset: Int = 0): [ProgramSet!]
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserType: String @deprecated(reason: "WIP")
-  teaserTypes: [String!] @deprecated(reason: "WIP")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [ProgramSet!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
   programSets: [ProgramSet!] @deprecated(reason: "only for backwards compatibility")
 }
 
@@ -4692,8 +5110,14 @@ enum ProgramSetsOrderBy {
   IMAGE_COLLECTION_ID_DESC
   LAST_ITEM_MODIFIED_ASC
   LAST_ITEM_MODIFIED_DESC
+  FEED_URL_2_ASC
+  FEED_URL_2_DESC
   LAST_ITEM_ADDED_ASC
   LAST_ITEM_ADDED_DESC
+  FEED_URL_ASC
+  FEED_URL_DESC
+  EXTERNAL_ID_ASC
+  EXTERNAL_ID_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -4704,8 +5128,10 @@ enum ProgramSetSortOrder {
 }
 
 type ProgramSetsSearchConnection {
+  title: String!
   pageInfo: PageInfo
   totalCount: Int!
+  tracking: JSON
   nodes: [ProgramSet!]!
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
@@ -4747,6 +5173,7 @@ type ProgramSetSubscriptionConnection {
   edges: [ProgramSetSubscriptionEdge]
   nodes: [ProgramSetSubscriptionInterface]
   pageInfo: PageInfo!
+  tracking(v: TrackingVariant): JSON
 }
 
 input ProgramSetSubscriptionConnectionFilterB {
@@ -5111,11 +5538,20 @@ type PublicationService implements Node & Teaser & CoreTeaser {
   homepageUrl: String
   order: Int
   parentServiceId: String
+  contacts: ContactOption
+  socialMediaAccounts: [SocialMediaAccount]
+  links: [Link]
+  description: String
 
   """
   Reads a single `Organization` that is related to this `PublicationService`.
   """
   organization: Organization
+
+  """
+  Reads a single `PublicationService` that is related to this `PublicationService`.
+  """
+  parentService: PublicationService
 
   """Reads and enables pagination through a set of `ProgramSet`."""
   programSets(
@@ -5151,6 +5587,40 @@ type PublicationService implements Node & Teaser & CoreTeaser {
     filter: ProgramSetFilter
   ): ProgramSetsConnection!
 
+  """Reads and enables pagination through a set of `PublicationService`."""
+  childServices(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Only read the last `n` values of the set."""
+    last: Int
+
+    """
+    Skip the first `n` values from our `after` cursor, an alternative to cursor
+    based pagination. May not be used with `last`.
+    """
+    offset: Int
+
+    """Read all values in the set before (above) this cursor."""
+    before: Cursor
+
+    """Read all values in the set after (below) this cursor."""
+    after: Cursor
+
+    """The method to use when ordering `PublicationService`."""
+    orderBy: [PublicationServicesOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
+
+    """
+    A condition to be used in determining which values should be returned by the collection.
+    """
+    condition: PublicationServiceCondition
+
+    """
+    A filter to be used in determining which values should be returned by the collection.
+    """
+    filter: PublicationServiceFilter
+  ): PublicationServicesConnection!
+
   """Reads and enables pagination through a set of `PermanentLivestream`."""
   permanentLivestreams(
     """Only read the first `n` values of the set."""
@@ -5172,7 +5642,7 @@ type PublicationService implements Node & Teaser & CoreTeaser {
     after: Cursor
 
     """The method to use when ordering `PermanentLivestream`."""
-    orderBy: [PermanentLivestreamsOrderBy!] = [ORDER_ASC]
+    orderBy: [PermanentLivestreamsOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5184,6 +5654,46 @@ type PublicationService implements Node & Teaser & CoreTeaser {
     """
     filter: PermanentLivestreamFilter
   ): PermanentLivestreamsConnection!
+
+  """Reads and enables pagination through a set of `GroupedShow`."""
+  groupedShows(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Only read the last `n` values of the set."""
+    last: Int
+
+    """
+    Skip the first `n` values from our `after` cursor, an alternative to cursor
+    based pagination. May not be used with `last`.
+    """
+    offset: Int
+
+    """Read all values in the set before (above) this cursor."""
+    before: Cursor
+
+    """Read all values in the set after (below) this cursor."""
+    after: Cursor
+
+    """
+    A filter to be used in determining which values should be returned by the collection.
+    """
+    filter: GroupedShowFilter
+  ): GroupedShowsConnection!
+
+  """Reads and enables pagination through a set of `GroupedShow`."""
+  groupedShowsList(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Skip the first `n` values."""
+    offset: Int
+
+    """
+    A filter to be used in determining which values should be returned by the collection.
+    """
+    filter: GroupedShowFilter
+  ): [GroupedShow!]
 
   """
   Reads and enables pagination through a set of `ImagesCollectionsBinariesView`.
@@ -5218,6 +5728,66 @@ type PublicationService implements Node & Teaser & CoreTeaser {
     """Skip the first `n` values."""
     offset: Int
   ): [ImagesCollectionsBinariesView!]
+
+  """
+  Alle Shows der Welle, die in den letzten 100 Tagen eine neue Folge rausgebracht haben
+  """
+  recentShows(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Only read the last `n` values of the set."""
+    last: Int
+
+    """
+    Skip the first `n` values from our `after` cursor, an alternative to cursor
+    based pagination. May not be used with `last`.
+    """
+    offset: Int
+
+    """Read all values in the set before (above) this cursor."""
+    before: Cursor
+
+    """Read all values in the set after (below) this cursor."""
+    after: Cursor
+
+    """The method to use when ordering `ProgramSet`."""
+    orderBy: [ProgramSetsOrderBy!]
+
+    """
+    A condition to be used in determining which values should be returned by the collection.
+    """
+    condition: ProgramSetCondition
+
+    """
+    A filter to be used in determining which values should be returned by the collection.
+    """
+    filter: ProgramSetFilter
+  ): ProgramSetsConnection!
+
+  """
+  Alle Shows der Welle, die in den letzten 100 Tagen eine neue Folge rausgebracht haben
+  """
+  recentShowsList(
+    """Only read the first `n` values of the set."""
+    first: Int
+
+    """Skip the first `n` values."""
+    offset: Int
+
+    """The method to use when ordering `ProgramSet`."""
+    orderBy: [ProgramSetsOrderBy!]
+
+    """
+    A condition to be used in determining which values should be returned by the collection.
+    """
+    condition: ProgramSetCondition
+
+    """
+    A filter to be used in determining which values should be returned by the collection.
+    """
+    filter: ProgramSetFilter
+  ): [ProgramSet!]
 
   """Reads and enables pagination through a set of `ProgramSet`."""
   shows(
@@ -5255,11 +5825,11 @@ type PublicationService implements Node & Teaser & CoreTeaser {
   path: String
   url(variant: UrlVariant): String
   sharingUrl: URL
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON
   id: ID!
   _raw: JSON @deprecated(reason: "only for internal debugging")
-  editorialDescription: String @deprecated(reason: "experimental")
+  editorialDescription: String @deprecated(reason: "workaround for old query, use teasers.editorialDescription instead of nodes")
 }
 
 """
@@ -5311,6 +5881,18 @@ input PublicationServiceCondition {
 
   """Checks for equality with the object’s `parentServiceId` field."""
   parentServiceId: String
+
+  """Checks for equality with the object’s `contacts` field."""
+  contacts: ContactOptionInput
+
+  """Checks for equality with the object’s `socialMediaAccounts` field."""
+  socialMediaAccounts: [SocialMediaAccountInput]
+
+  """Checks for equality with the object’s `links` field."""
+  links: [LinkInput]
+
+  """Checks for equality with the object’s `description` field."""
+  description: String
 }
 
 """
@@ -5359,8 +5941,14 @@ input PublicationServiceFilter {
   """Filter by the object’s `parentServiceId` field."""
   parentServiceId: StringFilter
 
+  """Filter by the object’s `description` field."""
+  description: StringFilter
+
   """Filter by the object’s `image` field."""
   image: ImageTypeFilter
+
+  """Filter by the object’s `contacts` field."""
+  contacts: ContactOptionFilter
 
   """Checks for all expressions in this list."""
   and: [PublicationServiceFilter!]
@@ -5389,6 +5977,7 @@ type PublicationServicesConnection {
   The count of *all* `PublicationService` you could get from the connection.
   """
   totalCount: Int!
+  tracking(v: TrackingVariant): JSON
 }
 
 """A `PublicationService` edge in the connection."""
@@ -5433,6 +6022,14 @@ enum PublicationServicesOrderBy {
   ORDER_DESC
   PARENT_SERVICE_ID_ASC
   PARENT_SERVICE_ID_DESC
+  CONTACTS_ASC
+  CONTACTS_DESC
+  SOCIAL_MEDIA_ACCOUNTS_ASC
+  SOCIAL_MEDIA_ACCOUNTS_DESC
+  LINKS_ASC
+  LINKS_DESC
+  DESCRIPTION_ASC
+  DESCRIPTION_DESC
   PRIMARY_KEY_ASC
   PRIMARY_KEY_DESC
 }
@@ -5552,30 +6149,36 @@ type PublishScheduledItemsPayload {
   query: Query
 }
 
-type Query {
+type Query implements Node {
+  """ Find all EndUsers. """
   allEndUsers(after: String, first: Int, before: String, last: Int, filter: EndUserFilterB, orderBy: EndUserSortOrder): EndUserConnection
 
   """ Find all Playlists. """
-  allPlaylists(after: String, first: Int, before: String, last: Int, filter: PlaylistFilterB, orderBy: PlaylistSortOrder): PlaylistConnection
+  allPlaylists(after: String, first: Int, before: String, last: Int, filter: PlaylistFilterB, orderBy: PlaylistSortOrder): PlaylistConnection @deprecated
 
   """ Find a Bookmark by id. """
   bookmark(
     """ id of the Bookmark """
     id: ID!
-  ): BookmarkInterface
+  ): BookmarkInterface @deprecated(reason: "please talk to AT BFF DEV Team if you use this resolver!")
 
   """ Find a BookmarkList by id. """
   bookmarkList(
     """ id of the BookmarkList """
     id: ID!
-  ): BookmarkListInterface
-  endUser(id: ID!): EndUserInterface
+  ): BookmarkListInterface @deprecated
+
+  """ Find a EndUser by id. """
+  endUser(
+    """ id of the EndUser """
+    id: ID!
+  ): EndUserInterface
 
   """ Find a HistoryEntry by id. """
   historyEntry(
     """ id of the HistoryEntry """
     id: ID!
-  ): HistoryEntryInterface
+  ): HistoryEntryInterface @deprecated(reason: "please talk to AT BFF DEV Team if you use this resolver!")
 
   """ Find a Playlist by id. """
   playlist(
@@ -5587,7 +6190,7 @@ type Query {
   programSetSubscription(
     """ id of the ProgramSetSubscription """
     id: ID!
-  ): ProgramSetSubscriptionInterface
+  ): ProgramSetSubscriptionInterface @deprecated
 
   """ Find a SubscriptionList by id. """
   subscriptionList(
@@ -5599,7 +6202,19 @@ type Query {
   system(
     """ id of the System """
     id: ID!
-  ): SystemInterface
+  ): SystemInterface @deprecated
+
+  """
+  Exposes the root query type nested one level down. This is helpful for Relay 1
+  which can only query top level fields if they are in a particular form.
+  """
+  query: Query!
+
+  """
+  The root query type must be a `Node` to work well with Relay 1 mutations. This just resolves to `query`.
+  """
+  nodeId: ID!
+  node(id: ID!): Node
 
   """Reads and enables pagination through a set of `Config`."""
   configs(
@@ -5656,7 +6271,7 @@ type Query {
     after: Cursor
 
     """The method to use when ordering `EditorialCategory`."""
-    orderBy: [EditorialCategoriesOrderBy!] = [ORDER_ASC]
+    orderBy: [EditorialCategoriesOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5794,7 +6409,7 @@ type Query {
     after: Cursor
 
     """The method to use when ordering `Item`."""
-    orderBy: [ItemsOrderBy!] = [PRIMARY_KEY_ASC]
+    orderBy: [ItemsOrderBy!] = [ORDER_ASC, PUBLISH_DATE_DESC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5806,40 +6421,6 @@ type Query {
     """
     filter: ItemFilter
   ): ItemsConnection
-
-  """Reads and enables pagination through a set of `Migration`."""
-  migrations(
-    """Only read the first `n` values of the set."""
-    first: Int
-
-    """Only read the last `n` values of the set."""
-    last: Int
-
-    """
-    Skip the first `n` values from our `after` cursor, an alternative to cursor
-    based pagination. May not be used with `last`.
-    """
-    offset: Int
-
-    """Read all values in the set before (above) this cursor."""
-    before: Cursor
-
-    """Read all values in the set after (below) this cursor."""
-    after: Cursor
-
-    """The method to use when ordering `Migration`."""
-    orderBy: [MigrationsOrderBy!] = [PRIMARY_KEY_ASC]
-
-    """
-    A condition to be used in determining which values should be returned by the collection.
-    """
-    condition: MigrationCondition
-
-    """
-    A filter to be used in determining which values should be returned by the collection.
-    """
-    filter: MigrationFilter
-  ): MigrationsConnection
 
   """Reads and enables pagination through a set of `Organization`."""
   organizations(
@@ -5862,7 +6443,7 @@ type Query {
     after: Cursor
 
     """The method to use when ordering `Organization`."""
-    orderBy: [OrganizationsOrderBy!] = [ORDER_ASC]
+    orderBy: [OrganizationsOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5896,7 +6477,7 @@ type Query {
     after: Cursor
 
     """The method to use when ordering `PermanentLivestream`."""
-    orderBy: [PermanentLivestreamsOrderBy!] = [ORDER_ASC]
+    orderBy: [PermanentLivestreamsOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5964,7 +6545,7 @@ type Query {
     after: Cursor
 
     """The method to use when ordering `PublicationService`."""
-    orderBy: [PublicationServicesOrderBy!] = [ORDER_ASC]
+    orderBy: [PublicationServicesOrderBy!] = [ORDER_ASC, PRIMARY_KEY_ASC]
 
     """
     A condition to be used in determining which values should be returned by the collection.
@@ -5984,10 +6565,12 @@ type Query {
   """editoralCategory Page from Sophora"""
   editorialCategory(id: ID!, source: SourceSystem, offset: Int = 0, limit: Int = 12): Board
   editorialCategoryBySophoraId(sophoraId: String!): EditorialCategory
+  editorialCategoryByCoreId(coreId: String!): EditorialCategory
 
   """editorialCollection from Postgres + Sophora"""
   editorialCollection(id: ID!, offset: Int = 0, limit: Int = 12, source: SourceSystem): EditorialCollection
   editorialCollectionByCoremediaId(coremediaId: String!): EditorialCollection
+  editorialCollectionByCoreId(coreId: String!): EditorialCollection
   grouping(id: String!): Grouping
   groupingByCoreId(coreId: String!): Grouping
   imageBinary(id: String!): ImageBinary
@@ -5995,8 +6578,6 @@ type Query {
   image(id: String!): Image
   item(id: ID!): Item
   itemByCoreId(coreId: String!): Item
-  migration(id: Int!): Migration
-  migrationByName(name: String!): Migration
   organizationById(id: Int!): Organization
   organization(id: ID, name: String): Organization
   organizationByCoreId(coreId: String!): Organization
@@ -6103,6 +6684,7 @@ type Query {
   itemsByIds(
     ids: [String]
     isPublished: Boolean
+    fast: Boolean
 
     """Only read the first `n` values of the set."""
     first: Int
@@ -6127,6 +6709,7 @@ type Query {
   itemsByIdsList(
     ids: [String]
     isPublished: Boolean
+    fast: Boolean
 
     """Only read the first `n` values of the set."""
     first: Int
@@ -6139,6 +6722,7 @@ type Query {
   """Reads and enables pagination through a set of `ProgramSet`."""
   programSetsByIds(
     ids: [String]
+    isPublished: Boolean
 
     """Only read the first `n` values of the set."""
     first: Int
@@ -6162,6 +6746,7 @@ type Query {
   """Reads and enables pagination through a set of `ProgramSet`."""
   programSetsByIdsList(
     ids: [String]
+    isPublished: Boolean
 
     """Only read the first `n` values of the set."""
     first: Int
@@ -6169,6 +6754,8 @@ type Query {
     """Skip the first `n` values."""
     offset: Int
   ): [ProgramSet!]
+  publicationServiceBySlug(slug: String): PublicationService
+  publisherBySlug(slug: String): PublicationService
 
   """Reads and enables pagination through a set of `ProgramSet`."""
   showsWithMapping(
@@ -6280,12 +6867,6 @@ type Query {
     nodeId: ID!
   ): Item
 
-  """Reads a single `Migration` using its globally unique `ID`."""
-  migrationByNodeId(
-    """The globally unique `ID` to be used in selecting a single `Migration`."""
-    nodeId: ID!
-  ): Migration
-
   """Reads a single `Organization` using its globally unique `ID`."""
   organizationByNodeId(
     """
@@ -6326,37 +6907,26 @@ type Query {
     nodeId: ID!
   ): Transcript
 
-  """
-  Fetches a list of entities using their representations; used for Apollo
-  Federation.
-  """
-  _entities(representations: [_Any!]!): [_Entity]! @deprecated(reason: "Only Apollo Federation should use this")
-
-  """
-  Entrypoint for Apollo Federation to determine more information about
-  this service.
-  """
-  _service: _Service! @deprecated(reason: "Only Apollo Federation should use this")
-
   """search route from Search Service 2.0"""
   search(query: String, offset: Int = 0, limit: Int = 24, type: SearchType = All, source: SourceSystem): SearchResult
 
   """homescreen Page from Sophora"""
   homescreen(id: ID, source: SourceSystem, limit: Int): Board
   show(id: ID!): ProgramSet
+  eventLivestream(id: ID!): EventLivestream
   section(id: ID!): Section
   sections(ids: [ID!]!): [Section!]
-  widget(id: ID!): SophoraWidget
-  widgets(ids: [ID!]!): [SophoraWidget!]
-  compilation(id: ID!): SophoraCompilation
-  compilations(ids: [ID!]!): [SophoraCompilation!]
-  teasers(ids: [ID!]!): [SophoraTeaser!]
-  node(id: ID!): Node
+  widget(id: ID!): SophoraWidget @deprecated(reason: "not for public use")
+  widgets(ids: [ID!]!): [SophoraWidget!] @deprecated(reason: "not for public use")
+  compilation(id: ID!): SophoraCompilation @deprecated(reason: "not for public use")
+  compilations(ids: [ID!]!): [SophoraCompilation!] @deprecated(reason: "not for public use")
+  teasers(ids: [ID!]!): [SophoraTeaser!] @deprecated(reason: "not for public use")
 
   """
   proxy resolver PEACH endpoint, to translate IDs from Integer to Core ID
   """
   popularEpisodes(category: ID): RecommendationSection @deprecated(reason: "for internal use / debugging")
+  jwt: JSON
 }
 
 """ A list of items to be played next. (de: Warteschlange, en: Queue) """
@@ -6519,20 +7089,21 @@ type RecommendationData {
 }
 
 type RecommendationMeta {
-  recommendationId: String!
-  algorithm: String!
+  recommendationId: String! @deprecated(reason: "Not used in ZDF Recommender")
+  algorithm: String
   presentationTitle: String
   fallbackUsed: Boolean!
-  endpointUrl: String!
+  endpointUrl: String
 }
 
 type RecommendationsConnection {
-  recommendationId: String!
+  recommendationId: String! @deprecated(reason: "Not used in ZDF Recommender")
   algorithm: String
   presentationTitle: String
   presentationTitleEn: String
   endpointUrl: String @deprecated(reason: "only for internal use")
   fallbackUsed: Boolean
+  tracking: JSON
   recommendations(limit: Int, offset: Int = 0): [RecommendationData!]
 }
 
@@ -6540,15 +7111,19 @@ type RecommendationSection implements Section {
   id: ID!
   title: String
   tracking: JSON
+  isPersonalized: Boolean!
   meta: RecommendationMeta
   key: String @deprecated(reason: "only for internal use")
   type: String
   layout: JSON
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserType: String @deprecated(reason: "WIP")
-  teaserTypes: [String!] @deprecated(reason: "WIP")
-  nodes(limit: Int, offset: Int = 0): [Teaser!]
+
+  """The type of teaser contained in this section, e.g. ITEM or SHOW"""
+  teaserType: String
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
   _items: JSON @deprecated(reason: "only for internal stiching/debugging")
 }
 
@@ -6567,8 +7142,10 @@ input RemoteIDFilterB {
 }
 
 type SearchResult {
+  assets: ItemsSearchConnection
   items: ItemsSearchConnection
   programSets: ProgramSetsSearchConnection
+  shows: ProgramSetsSearchConnection
   editorialCategories: EditorialCategoriesConnection
   editorialCollections: EditorialCollectionsConnection
   tracking: JSON
@@ -6594,11 +7171,12 @@ interface Section {
   tracking: JSON
   key: String @deprecated(reason: "only for internal use")
   type: String
-  teaserType: String @deprecated(reason: "WIP")
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserTypes: [String!] @deprecated(reason: "WIP")
-  nodes(limit: Int, offset: Int = 0): [Teaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
 }
 
 enum ShowType {
@@ -6606,6 +7184,28 @@ enum ShowType {
   FINITE_SERIES
   SEASON_SERIES
   SINGLE
+}
+
+type SocialMediaAccount {
+  service: SocialMediaType
+  url: String
+}
+
+"""An input for mutations affecting `SocialMediaAccount`"""
+input SocialMediaAccountInput {
+  service: SocialMediaType
+  url: String
+}
+
+enum SocialMediaType {
+  FACEBOOK
+  MASTODON
+  TWITTER
+  INSTAGRAM
+  YOUTUBE
+  TIKTOK
+  SPOTIFY
+  PINTEREST
 }
 
 type SophoraCompilation {
@@ -6621,7 +7221,7 @@ type SophoraTeaser implements Teaser {
   id: ID!
   sophoraType: String
   sophoraTitle: String
-  titleV2: SophoraTitles @deprecated(reason: "experimental")
+  titles: SophoraTitles
 
   """ mediumTitle from Sophora MeCu API, used as `Kurzbeschreibung` filled by ARDonline Audiotheks-Redaktion 
   """
@@ -6634,21 +7234,26 @@ type SophoraTeaser implements Teaser {
   url(variant: UrlVariant): String
   sharingUrl: URL
   path: String
-  tracking: JSON
+
+  """ The background color as hex string for the teaser to be used by the client 
+  """
+  backgroundColor: String
+  tracking(v: TrackingVariant): JSON
   numberOfElements: Int @deprecated(reason: "is always null for items")
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
-  node: Teaser
+  node: Teaser @deprecated(reason: "Please use content")
+  content: Teaser
 }
 
 type SophoraTitles {
   default: String
   short: String
   long: String
-  isVisible: Bool @deprecated(reason: "experimental")
+  isVisible: Bool
 }
 
-type SophoraWidget implements Section {
+type SophoraWidget implements Section & Widget {
   id: ID
   title: String
   key: String
@@ -6658,18 +7263,21 @@ type SophoraWidget implements Section {
   SPECIAL, … (might be extended with other values for Special widgets)
   """
   type: String
+  visibility: WidgetVisibility
   displayVariant: WidgetDisplayVariant
 
   """ S, M, L, XL """
   size: String
   layout: JSON
   tracking: JSON
-  nodes(limit: Int, offset: Int = 0): [Teaser!]
-  teaserType: String @deprecated(reason: "WIP")
-  nodeType: String @deprecated(reason: "only for backwards compatibility")
-  nodeTypes: [TeaserTypeATG!]
-  teaserTypes: [String!] @deprecated(reason: "WIP")
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
   _raw: JSON @deprecated(reason: "only for internal debugging")
+  errors: JSON
 
   """should the Sophora Widget title be displayed by clients or not"""
   titleVisible: Boolean
@@ -6681,6 +7289,32 @@ enum SourceSystem {
   CoreMedia @deprecated
   Postgres
   Core
+}
+
+type Stage implements Section & Widget {
+  id: ID
+  title: String
+  key: String
+
+  """ modified Sophora Widget Type, e.g. STAGE """
+  type: String
+  displayVariant: WidgetDisplayVariant
+
+  """ S, M, L, XL """
+  size: String
+  layout: JSON
+  tracking: JSON
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+
+  """should the Sophora Widget title be displayed by clients or not"""
+  titleVisible: Boolean
+  compilation: SophoraCompilation
 }
 
 enum Status {
@@ -6739,15 +7373,20 @@ input StatusFilter {
 type StreamType {
   url: String
   title: String
-  mimetype: String
+
+  """media mimeType e.g. `audio/mp4` of the stream"""
+  mimeType: String
   rowId: String
+  mimetype: String @deprecated(reason: "use mimeType")
 }
 
 """An input for mutations affecting `StreamType`"""
 input StreamTypeInput {
   url: String
   title: String
-  mimetype: String
+
+  """media mimeType e.g. `audio/mp4` of the stream"""
+  mimeType: String
   id: String
 }
 
@@ -7014,6 +7653,7 @@ type SubscriptionList implements SubscriptionListInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ This is a generated connection for SubscriptionList """
@@ -7088,6 +7728,7 @@ interface SubscriptionListInterface {
   """ Associates Subscriptions, History items, Playlists, the Queue and User Properties with a user. (de: User, en: user) 
   """
   user: EndUserInterface
+  tracking(v: TrackingVariant): JSON
 }
 
 """ The payload returned from mutations of SubscriptionList. """
@@ -7221,7 +7862,7 @@ interface Teaser {
   sharingUrl: URL
   path: String
   numberOfElements: Int
-  tracking: JSON
+  tracking(v: TrackingVariant): JSON
   _links: JSON @deprecated(reason: "only for old / hal-json queries")
   _raw: JSON @deprecated(reason: "only for internal debugging")
 }
@@ -7233,6 +7874,11 @@ enum TeaserTypeATG {
   EditorialCollection
   EditorialCategory
   SophoraTeaser
+}
+
+enum TrackingVariant {
+  GAMMA
+  PIANO
 }
 
 type Transcript implements Node {
@@ -7260,6 +7906,36 @@ enum UrlVariant {
   API
   SHARING
   WEB
+  EMBED
+}
+
+interface Widget {
+  id: ID
+  title: String
+  key: String
+
+  """
+   modified Sophora Widget Type, i.e. GRID_LIST, GRID_LIST_COLLAPSIBLE, STAGE,
+  SPECIAL, … (might be extended with other values for Special widgets)
+  """
+  type: String
+  displayVariant: WidgetDisplayVariant
+
+  """ S, M, L, XL """
+  size: String
+  layout: JSON
+  tracking: JSON
+  nodes(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [Teaser!]
+  teasers(limit: Int, offset: Int = 0, hideUnresolvedTeasers: Boolean): [SophoraTeaser!]
+  teaserType: String @deprecated(reason: "Only works on RecommendationSection, see https://jira.ard.de/browse/ARDAPII7-6874")
+  nodeType: String @deprecated(reason: "only for backwards compatibility, use teaserType")
+  nodeTypes: [TeaserTypeATG!] @deprecated(reason: "only for backwards compatibility, use teaserType")
+  teaserTypes: [String!] @deprecated(reason: "WIP, use teaserType")
+  _raw: JSON @deprecated(reason: "only for internal debugging")
+
+  """should the Sophora Widget title be displayed by clients or not"""
+  titleVisible: Boolean
+  compilation: SophoraCompilation
 }
 
 enum WidgetDisplayVariant {
@@ -7267,5 +7943,11 @@ enum WidgetDisplayVariant {
   SLIDER
   COLLAPSIBLE_GRID
   GRID
+}
+
+enum WidgetVisibility {
+  ALWAYS
+  NOT_LOGGED_IN
+  LOGGED_IN
 }
 

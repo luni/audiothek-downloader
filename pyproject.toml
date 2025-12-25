@@ -13,6 +13,8 @@ dependencies = [
 dev = [
     "pytest-aiohttp>=1.1.0",
     "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "graphql-core>=3.2.6",
     "ruff>=0.9.6",
     "tox>=4.24.1",
     "pytest-asyncio>=0.25.3",
@@ -20,6 +22,7 @@ dev = [
     "xenon>=0.9.3",
     "vulture>=2.14",
     "pyright>=1.1.399",
+    "bandit>=1.9.2",
 ]
 
 [tool.ruff]
@@ -48,18 +51,21 @@ ignore = ["D203", "D213", "D100", "F821"]  # Ignore specific docstring rules
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "--cov=audiothek",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
 ]
 pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
 
 [tool.pyright]
-exclude = ["**/__pycache__", "**/node_modules", "**/dist", "**/build", "**/venv", "**/.venv"]
+exclude = ["**/__pycache__", "**/node_modules", "**/dist", "**/build", "**/venv", "**/.venv", "**/tests"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests"]
 
 [tool.vulture]
-exclude = ["dist", "build", "venv", ".venv", "tests" ]
+exclude = ["dist", "build", "venv", ".venv", "tests"]
 ignore_decorators = ["@app.route", "@require_*"]
 ignore_names = ["visit_*", "do_*"]
 # make_whitelist = true

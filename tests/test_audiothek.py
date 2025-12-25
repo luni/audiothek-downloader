@@ -1,0 +1,125 @@
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+import audiothek
+from tests.conftest import GraphQLMock
+
+
+def test_parse_url_episode_urn() -> None:
+    assert audiothek.parse_url("https://www.ardaudiothek.de/folge/x/urn:ard:episode:abc/") == ("episode", "urn:ard:episode:abc")
+
+
+def test_parse_url_collection_urn() -> None:
+    assert audiothek.parse_url("https://www.ardaudiothek.de/sammlung/x/urn:ard:page:xyz") == ("collection", "urn:ard:page:xyz")
+
+
+def test_parse_url_program_urn_and_numeric() -> None:
+    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/urn:ard:show:111") == ("program", "urn:ard:show:111")
+    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/12345/") == ("program", "12345")
+
+
+def test_parse_url_none() -> None:
+    assert audiothek.parse_url("https://www.ardaudiothek.de/sendung/x/") is None
+
+
+def test_download_single_episode_writes_files(tmp_path: Path, mock_requests_get: object) -> None:
+    audiothek.download_single_episode("urn:ard:episode:test", str(tmp_path))
+
+    # written under programSet id from mock
+    program_dir = tmp_path / "ps1"
+    assert program_dir.exists()
+
+    files = {p.name for p in program_dir.iterdir()}
+    assert any(name.endswith(".mp3") for name in files)
+    assert any(name.endswith(".jpg") for name in files)
+    assert any(name.endswith(".json") for name in files)
+
+    meta_path = next(p for p in program_dir.iterdir() if p.name.endswith(".json"))
+    meta = json.loads(meta_path.read_text())
+    assert meta["id"] == "urn:ard:episode:test"
+    assert meta["programSet"]["id"] == "ps1"
+
+
+def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
+    audiothek.download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+
+    program_dir = tmp_path / "ps1"
+    assert program_dir.exists()
+
+    # Two pages x two nodes => two meta json files should exist (duplicates are possible by id, but filenames include id)
+    json_files = [p for p in program_dir.iterdir() if p.name.endswith(".json")]
+    assert len(json_files) == 4
+
+    # Ensure pagination occurred: graphql was called twice for ProgramSetEpisodesQuery
+    calls = [c for c in graphql_mock.calls if c["operation"] == "ProgramSetEpisodesQuery"]
+    assert len(calls) == 2
+    assert calls[0]["variables"]["offset"] == 0
+    assert calls[1]["variables"]["offset"] == 24
+
+
+def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: object) -> None:
+    audiothek.save_nodes(
+        [
+            {
+                "id": "e1",
+                "title": "t",
+                "audios": [],
+                "programSet": {"id": "ps1"},
+            }
+        ],
+        str(tmp_path),
+    )
+
+    assert not (tmp_path / "ps1").exists()
+
+
+def test_main_invalid_url_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("ERROR"):
+        audiothek.main("https://invalid.example", str(tmp_path))
+    assert any("Could not determine resource ID" in r.message for r in caplog.records)
+
+
+def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    program_dir = tmp_path / "ps1"
+    program_dir.mkdir(parents=True)
+
+    # save_nodes builds filename as: <sanitized_title>_<node_id>
+    filename = "Existing_e1_e1"
+    (program_dir / f"{filename}.mp3").write_bytes(b"old")
+    (program_dir / f"{filename}.jpg").write_bytes(b"old")
+    (program_dir / f"{filename}_x1.jpg").write_bytes(b"old")
+
+    calls: list[str] = []
+
+    def _get(url: str, params: dict | None = None, timeout: int | None = None):
+        calls.append(url)
+
+        class _Resp:
+            content = b"new"
+
+            def json(self):
+                return {}
+
+        return _Resp()
+
+    monkeypatch.setattr("requests.get", _get)
+
+    audiothek.save_nodes(
+        [
+            {
+                "id": "e1",
+                "title": "Existing e1",
+                "image": {"url": "https://cdn.test/image_{width}.jpg", "url1X1": "https://cdn.test/image1x1_{width}.jpg"},
+                "audios": [{"downloadUrl": "https://cdn.test/audio.mp3"}],
+                "programSet": {"id": "ps1"},
+            }
+        ],
+        str(tmp_path),
+    )
+
+    # Only mp3 should be skipped because it exists; images too. No network calls expected.
+    assert calls == []
+    assert os.path.exists(program_dir / f"{filename}.json")

@@ -1,4 +1,7 @@
 output/
 .vscode/
-venv/
 .DS_Store
+.ruff_cache/
+.venv/
+*.pyc
+__pycache__/
