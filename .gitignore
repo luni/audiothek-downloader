@@ -1,7 +1,9 @@
-output/
+/output
 .vscode/
 .DS_Store
-.ruff_cache/
-.venv/
+/.ruff_cache/
+/.venv/
 *.pyc
-__pycache__/
+/__pycache__/
+/.coverage
+/.pytest_cache/
