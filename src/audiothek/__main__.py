@@ -35,19 +35,41 @@ def main() -> None:
         action="store_true",
         help="Migrate existing folders to new naming schema (ID + Title)",
     )
+    group.add_argument(
+        "--editorial-category-id",
+        type=str,
+        default="",
+        help="Search for program sets and/or editorial collections by editorial category id",
+    )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
+    parser.add_argument(
+        "--search-type",
+        choices=["program-sets", "collections", "all"],
+        default="all",
+        help="When using --editorial-category-id, select what to return",
+    )
 
     args = parser.parse_args()
     url = args.url
     id = args.id
     update_folders = args.update_folders
     migrate_folders = args.migrate_folders
+    editorial_category_id = args.editorial_category_id
+    search_type = args.search_type
     folder = os.path.realpath(args.folder)
 
-    _main(url, folder, id, update_folders, migrate_folders)
+    _process_request(url, folder, id, update_folders, migrate_folders, editorial_category_id, search_type)
 
 
-def _main(url: str, folder: str, id: str = "", update_folders: bool = False, migrate_folders: bool = False) -> None:
+def _process_request(
+    url: str,
+    folder: str,
+    id: str = "",
+    update_folders: bool = False,
+    migrate_folders: bool = False,
+    editorial_category_id: str = "",
+    search_type: str = "all",
+) -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
@@ -56,6 +78,8 @@ def _main(url: str, folder: str, id: str = "", update_folders: bool = False, mig
         id: The direct ID of the resource (alternative to URL)
         update_folders: Whether to update all existing subfolders
         migrate_folders: Whether to migrate folders to new naming schema
+        editorial_category_id: The editorial category ID to search for program sets and/or editorial collections
+        search_type: Whether to search for program sets, editorial collections, or both
 
     Returns:
         None
@@ -69,6 +93,18 @@ def _main(url: str, folder: str, id: str = "", update_folders: bool = False, mig
 
     if update_folders:
         downloader.update_all_folders(folder)
+        return
+
+    if editorial_category_id:
+        if search_type in {"program-sets", "all"}:
+            program_sets = downloader.find_program_sets_by_editorial_category_id(editorial_category_id)
+            for program_set in program_sets:
+                print(program_set)
+
+        if search_type in {"collections", "all"}:
+            collections = downloader.find_editorial_collections_by_editorial_category_id(editorial_category_id)
+            for collection in collections:
+                print(collection)
         return
 
     if id:

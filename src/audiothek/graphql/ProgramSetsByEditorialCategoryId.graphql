@@ -1,0 +1,25 @@
+query ProgramSetsByEditorialCategoryId($editorialCategoryId: String!, $offset: Int!, $count: Int!) {
+  result: programSets(
+    offset: $offset
+    first: $count
+    filter: { editorialCategoryId: { equalTo: $editorialCategoryId } }
+  ) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    totalCount
+    nodes {
+      id
+      coreId
+      title
+      synopsis
+      numberOfElements
+      image {
+        url
+        url1X1
+      }
+      editorialCategoryId
+    }
+  }
+}

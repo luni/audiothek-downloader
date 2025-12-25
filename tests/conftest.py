@@ -17,6 +17,9 @@ class MockResponse:
             raise ValueError("No JSON payload configured")
         return self._json
 
+    def raise_for_status(self) -> None:
+        return None
+
 
 class GraphQLMock:
     def __init__(self, schema: GraphQLSchema) -> None:
@@ -51,6 +54,82 @@ class GraphQLMock:
                         "image": {"url": "https://cdn.test/image_{width}.jpg", "url1X1": "https://cdn.test/image1x1_{width}.jpg"},
                         "programSet": {"id": "ps1", "title": "Prog", "path": "/p"},
                         "audios": [{"downloadUrl": "https://cdn.test/audio.mp3", "url": "https://cdn.test/audio_alt.mp3"}],
+                    }
+                }
+            }
+
+        if operation_name == "ProgramSetsByEditorialCategoryId":
+            offset = int(variables["offset"])
+            count = int(variables["count"])
+            has_next = offset == 0
+            nodes = [
+                {
+                    "id": f"ps{offset + 1}",
+                    "coreId": f"core_ps{offset + 1}",
+                    "title": f"Program Set {offset + 1}",
+                    "synopsis": "syn",
+                    "numberOfElements": 10,
+                    "image": {"url": "https://cdn.test/program_{width}.jpg", "url1X1": "https://cdn.test/program1x1_{width}.jpg"},
+                    "editorialCategoryId": variables["editorialCategoryId"],
+                },
+                {
+                    "id": f"ps{offset + 2}",
+                    "coreId": f"core_ps{offset + 2}",
+                    "title": f"Program Set {offset + 2}",
+                    "synopsis": "syn",
+                    "numberOfElements": 10,
+                    "image": {"url": "https://cdn.test/program_{width}.jpg", "url1X1": "https://cdn.test/program1x1_{width}.jpg"},
+                    "editorialCategoryId": variables["editorialCategoryId"],
+                },
+            ][:count]
+
+            return {
+                "data": {
+                    "result": {
+                        "pageInfo": {"hasNextPage": has_next, "endCursor": ""},
+                        "totalCount": len(nodes) + (2 if has_next else 0),
+                        "nodes": nodes,
+                    }
+                }
+            }
+
+        if operation_name == "EditorialCategoryCollections":
+            offset = int(variables["offset"])
+            count = int(variables["count"])
+            has_next = offset == 0
+            nodes = [
+                {
+                    "id": f"ec{offset + 1}",
+                    "coreId": f"core_ec{offset + 1}",
+                    "title": f"Editorial Collection {offset + 1}",
+                    "synopsis": "syn",
+                    "summary": "sum",
+                    "image": {"url": "https://cdn.test/collection_{width}.jpg", "url1X1": "https://cdn.test/collection1x1_{width}.jpg"},
+                    "sharingUrl": "https://example.com/share/ec1",
+                    "path": "/collection/ec1",
+                    "numberOfElements": 4,
+                    "broadcastDuration": 3600,
+                },
+                {
+                    "id": f"ec{offset + 2}",
+                    "coreId": f"core_ec{offset + 2}",
+                    "title": f"Editorial Collection {offset + 2}",
+                    "synopsis": "syn",
+                    "summary": "sum",
+                    "image": {"url": "https://cdn.test/collection_{width}.jpg", "url1X1": "https://cdn.test/collection1x1_{width}.jpg"},
+                    "sharingUrl": "https://example.com/share/ec2",
+                    "path": "/collection/ec2",
+                    "numberOfElements": 4,
+                    "broadcastDuration": 3600,
+                },
+            ][:count]
+
+            return {
+                "data": {
+                    "result": {
+                        "id": variables["id"],
+                        "title": "Category",
+                        "sections": [{"nodes": nodes}],
                     }
                 }
             }

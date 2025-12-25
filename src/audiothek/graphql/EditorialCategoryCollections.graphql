@@ -1,0 +1,25 @@
+query EditorialCategoryCollections($id: ID!, $offset: Int!, $count: Int!) {
+  result: editorialCategory(id: $id, offset: $offset, limit: $count) {
+    id
+    title
+    sections(limit: $count, offset: $offset) {
+      ... on EditorialCollectionSection {
+        nodes(limit: $count, offset: $offset) {
+          id
+          coreId
+          title
+          synopsis
+          summary
+          image {
+            url
+            url1X1
+          }
+          sharingUrl
+          path
+          numberOfElements
+          broadcastDuration
+        }
+      }
+    }
+  }
+}

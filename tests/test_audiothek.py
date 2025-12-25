@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 import requests
 
-from audiothek import AudiothekDownloader, _sanitize_folder_name
-from audiothek.__main__ import _main
+from audiothek import AudiothekDownloader, sanitize_folder_name
+from audiothek.__main__ import _process_request, main
 from tests.conftest import GraphQLMock, MockResponse
 
 
@@ -95,9 +95,15 @@ def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
-    # Two pages x two nodes => two meta json files should exist (duplicates are possible by id, but filenames include id)
+    # Two pages x two nodes => four episode meta json files + one collection metadata file + episode images + collection cover image
     json_files = [p for p in program_dir.iterdir() if p.name.endswith(".json")]
-    assert len(json_files) == 4
+    jpg_files = [p for p in program_dir.iterdir() if p.name.endswith(".jpg")]
+    assert len(json_files) == 5  # 4 episodes + 1 collection metadata
+    assert len(jpg_files) >= 1  # At least 1 collection cover image (plus episode images)
+
+    # Check that collection cover image exists
+    collection_cover = program_dir / "ps1.jpg"
+    assert collection_cover.exists()
 
     # Ensure pagination occurred: graphql was called twice for ProgramSetEpisodesQuery
     calls = [c for c in graphql_mock.calls if c["operation"] == "ProgramSetEpisodesQuery"]
@@ -125,18 +131,18 @@ def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: objec
 
 def test_main_invalid_url_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
-        _main("https://invalid.example", str(tmp_path))
+        _process_request("https://invalid.example", str(tmp_path))
     assert any("Could not determine resource ID" in r.message for r in caplog.records)
 
 
 def test_main_invalid_id_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
-        _main("", str(tmp_path), id="invalid_id")
+        _process_request("", str(tmp_path), id="invalid_id")
     assert any("Could not determine resource type from ID" in r.message for r in caplog.records)
 
 
 def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None:
-    _main("", str(tmp_path), id="urn:ard:episode:test")
+    _process_request("", str(tmp_path), id="urn:ard:episode:test")
 
     # written under programSet id and title from mock: "ps1 Prog"
     program_dir = tmp_path / "ps1 Prog"
@@ -148,7 +154,7 @@ def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None
 
 
 def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
-    _main("", str(tmp_path), id="ps1")
+    _process_request("", str(tmp_path), id="ps1")
 
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
@@ -179,7 +185,7 @@ def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, capl
 
 def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
     # Test the URL path in main function
-    _main("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
+    _process_request("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
 
     # written under programSet id and title from mock: "ps1 Prog"
     program_dir = tmp_path / "ps1 Prog"
@@ -203,6 +209,23 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
     assert not (tmp_path / "ps1 Prog").exists()
+
+
+def test_download_collection_no_metadata_when_no_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that no metadata file is created when API returns no results."""
+    def _mock_get_no_results(url: str, params: dict | None = None, timeout: int | None = None):
+        if url == "https://api.ardaudiothek.de/graphql":
+            return MockResponse(_json={"data": {"result": None}})
+        return MockResponse(content=b"binary")
+
+    monkeypatch.setattr("requests.get", _mock_get_no_results)
+
+    downloader = AudiothekDownloader()
+    downloader._download_collection("https://x", "test_id", str(tmp_path), is_editorial_collection=False)
+
+    # No series folder should be created, so no metadata file should exist
+    assert not (tmp_path / "test_id.json").exists()
+    assert not (tmp_path / "test_id Prog").exists()
 
 
 def test_save_nodes_directory_creation_error_logs_and_returns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -246,14 +269,14 @@ def test_main_argument_parsing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with URL for episode
-    _main("https://example.com/episode/test", str(tmp_path))
+    _process_request("https://example.com/episode/test", str(tmp_path))
     assert len(calls) == 1
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/episode/test"
 
     # Clear calls and test with URL for program
     calls.clear()
-    _main("https://example.com/program/test", str(tmp_path))
+    _process_request("https://example.com/program/test", str(tmp_path))
     assert len(calls) == 1
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/program/test"
@@ -465,10 +488,84 @@ def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with update_folders=True
-    _main("", str(tmp_path), update_folders=True)
+    _process_request("", str(tmp_path), update_folders=True)
 
     assert len(calls) == 1
     assert calls[0] == ("update_all_folders", str(tmp_path))
+
+
+def test_cli_main_parses_args_and_calls_downloader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def _mock_download_from_url(self, url: str, folder: str) -> None:
+        calls.append(("download_from_url", url, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+
+    argv = ["audiothek", "--url", "https://example.com/u", "--folder", str(tmp_path)]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    assert len(calls) == 1
+    assert calls[0][0] == "download_from_url"
+    assert calls[0][1] == "https://example.com/u"
+    assert os.path.realpath(calls[0][2]) == os.path.realpath(str(tmp_path))
+
+
+def test_cli_main_editorial_category_prints_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _mock_find_program_sets(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, object]]:  # noqa: ARG001
+        return [{"id": "ps1"}, {"id": "ps2"}]
+
+    monkeypatch.setattr(AudiothekDownloader, "find_program_sets_by_editorial_category_id", _mock_find_program_sets)
+
+    argv = [
+        "audiothek",
+        "--editorial-category-id",
+        "cat123",
+        "--search-type",
+        "program-sets",
+        "--folder",
+        str(tmp_path),
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+    out = capsys.readouterr().out
+    assert "ps1" in out
+    assert "ps2" in out
+
+
+def test_find_program_sets_by_editorial_category_id_paginates(
+    mock_requests_get: object,
+    graphql_mock: GraphQLMock,
+) -> None:
+    downloader = AudiothekDownloader()
+    nodes = downloader.find_program_sets_by_editorial_category_id("cat123", limit=3)
+
+    assert len(nodes) == 3
+    calls = [c for c in graphql_mock.calls if c["operation"] == "ProgramSetsByEditorialCategoryId"]
+    assert len(calls) == 2
+    assert calls[0]["variables"]["offset"] == 0
+    assert calls[1]["variables"]["offset"] == 24
+
+
+def test_find_editorial_collections_by_editorial_category_id_paginates_until_limit(
+    mock_requests_get: object,
+    graphql_mock: GraphQLMock,
+) -> None:
+    downloader = AudiothekDownloader()
+    nodes = downloader.find_editorial_collections_by_editorial_category_id("cat123", limit=3)
+
+    assert len(nodes) == 3
+    calls = [c for c in graphql_mock.calls if c["operation"] == "EditorialCategoryCollections"]
+    assert len(calls) == 2
+    assert calls[0]["variables"]["offset"] == 0
+    assert calls[1]["variables"]["offset"] == 24
 
 
 def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -609,7 +706,7 @@ def test_main_with_migrate_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
 
     with monkeypatch.context():
-        _main("", str(tmp_path), update_folders=False, migrate_folders=True)
+        _process_request("", str(tmp_path), update_folders=False, migrate_folders=True)
 
     # Check that folders were renamed
     assert not (tmp_path / "123456").exists()
@@ -736,23 +833,23 @@ def test_migrate_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.
         downloader.migrate_folders(str(tmp_path))
 
 
-def test_sanitize_folder_name_edge_cases() -> None:
-    """Test _sanitize_folder_name with edge cases."""
+def testsanitize_folder_name_edge_cases() -> None:
+    """Test sanitize_folder_name with edge cases."""
     # Test empty string
-    assert _sanitize_folder_name("") == ""
+    assert sanitize_folder_name("") == ""
 
     # Test string with only problematic characters
-    assert _sanitize_folder_name("<>:\"/\\|?*") == "_________"
+    assert sanitize_folder_name("<>:\"/\\|?*") == "_________"
 
     # Test string with leading/trailing spaces and dots
-    assert _sanitize_folder_name("  .test.  ") == "test"
+    assert sanitize_folder_name("  .test.  ") == "test"
 
     # Test string with multiple spaces
-    assert _sanitize_folder_name("test    multiple    spaces") == "test multiple spaces"
+    assert sanitize_folder_name("test    multiple    spaces") == "test multiple spaces"
 
     # Test long string gets truncated
     long_name = "a" * 150
-    result = _sanitize_folder_name(long_name)
+    result = sanitize_folder_name(long_name)
     assert len(result) == 100
     assert result.endswith("a")
 
@@ -1130,13 +1227,18 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
 
 
 def test_download_collection_saves_editorial_collection_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
-    """Test that editorial collection metadata is saved as <id>.json file."""
+    """Test that editorial collection metadata and cover image are saved in the series folder."""
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "ec1", str(tmp_path), is_editorial_collection=True)
 
-    # Check that editorial collection metadata file was created
-    collection_file = tmp_path / "ec1.json"
+    # Check that editorial collection metadata file was created in the series folder
+    series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
+    collection_file = series_folder / "ec1.json"
     assert collection_file.exists()
+
+    # Check that cover image was saved
+    cover_image_file = series_folder / "ec1.jpg"
+    assert cover_image_file.exists()
 
     # Verify the metadata content
     metadata = json.loads(collection_file.read_text())
@@ -1155,13 +1257,18 @@ def test_download_collection_saves_editorial_collection_metadata(tmp_path: Path,
 
 
 def test_download_collection_saves_program_set_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
-    """Test that program set metadata is saved as <id>.json file."""
+    """Test that program set metadata and cover image are saved in the series folder."""
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
 
-    # Check that program set metadata file was created
-    collection_file = tmp_path / "ps1.json"
+    # Check that program set metadata file was created in the series folder
+    series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
+    collection_file = series_folder / "ps1.json"
     assert collection_file.exists()
+
+    # Check that cover image was saved
+    cover_image_file = series_folder / "ps1.jpg"
+    assert cover_image_file.exists()
 
     # Verify the metadata content
     metadata = json.loads(collection_file.read_text())
@@ -1259,20 +1366,113 @@ def test_save_collection_data_directory_creation_error(tmp_path: Path, monkeypat
     assert any("Couldn't create output directory" in r.message for r in caplog.records)
 
 
-def test_save_collection_data_file_write_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    """Test _save_collection_data when file write fails."""
-    def _mock_open_error(*args, **kwargs):
-        raise OSError("Disk full")
+def test_save_collection_data_downloads_cover_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that _save_collection_data downloads cover image when available."""
+    downloader = AudiothekDownloader()
 
-    monkeypatch.setattr("builtins.open", _mock_open_error)
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Collection",
+        "image": {"url": "https://cdn.test/collection_{width}.jpg"}
+    }
+
+    # Mock requests.get to simulate image download
+    def _mock_get(url: str, timeout: int | None = None):
+        class MockResponse:
+            def raise_for_status(self):
+                pass
+            @property
+            def content(self):
+                return b"fake_image_data"
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_get)
+
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check that cover image was saved
+    cover_image_file = tmp_path / "test_ec.jpg"
+    assert cover_image_file.exists()
+    assert cover_image_file.read_bytes() == b"fake_image_data"
+
+
+def test_save_collection_data_no_image_url(tmp_path: Path) -> None:
+    """Test _save_collection_data when no image URL is provided."""
+    downloader = AudiothekDownloader()
+
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Collection",
+        "image": {}  # Empty image dict
+    }
+
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check that metadata file exists but no cover image
+    collection_file = tmp_path / "test_ec.json"
+    assert collection_file.exists()
+
+    cover_image_file = tmp_path / "test_ec.jpg"
+    assert not cover_image_file.exists()
+
+
+def test_save_collection_data_image_download_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _save_collection_data when image download fails."""
+    def _mock_get_error(url: str, timeout: int | None = None):
+        class MockResponse:
+            def raise_for_status(self):
+                raise requests.HTTPError("404 Not Found")
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_get_error)
 
     downloader = AudiothekDownloader()
-    collection_data = {"id": "test", "title": "Test"}
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Collection",
+        "image": {"url": "https://cdn.test/collection_{width}.jpg"}
+    }
 
     with caplog.at_level("ERROR"):
         downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
-    assert any("Error saving editorial collection data" in r.message for r in caplog.records)
+    assert any("Error downloading editorial collection cover image" in r.message for r in caplog.records)
+
+
+def test_save_collection_data_skips_existing_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _save_collection_data skips download when image already exists."""
+    downloader = AudiothekDownloader()
+
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Collection",
+        "image": {"url": "https://cdn.test/collection_{width}.jpg"}
+    }
+
+    # Create existing image file
+    cover_image_file = tmp_path / "test_ec.jpg"
+    cover_image_file.write_bytes(b"existing_image_data")
+
+    # Mock requests.get - this should not be called
+    get_called = False
+    def _mock_get(url: str, timeout: int | None = None):
+        nonlocal get_called
+        get_called = True
+        class MockResponse:
+            def raise_for_status(self):
+                pass
+            @property
+            def content(self):
+                return b"new_image_data"
+        return MockResponse()
+
+    monkeypatch.setattr("requests.get", _mock_get)
+
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check that existing file was not overwritten
+    assert cover_image_file.read_bytes() == b"existing_image_data"
+    assert not get_called  # requests.get should not have been called
 
 
 def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
@@ -1280,8 +1480,9 @@ def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Pat
     downloader = AudiothekDownloader()
     downloader.download_from_url("https://www.ardaudiothek.de/sammlung/test/urn:ard:page:ec1/", str(tmp_path))
 
-    # Check that editorial collection metadata file was created
-    collection_file = tmp_path / "ec1.json"
+    # Check that editorial collection metadata file was created in the series folder
+    series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
+    collection_file = series_folder / "ec1.json"
     assert collection_file.exists()
 
     # Verify it's editorial collection metadata
@@ -1295,8 +1496,9 @@ def test_download_collection_with_program_set_id_from_url(tmp_path: Path, mock_r
     downloader = AudiothekDownloader()
     downloader.download_from_url("https://www.ardaudiothek.de/sendung/test/urn:ard:show:ps1/", str(tmp_path))
 
-    # Check that program set metadata file was created
-    collection_file = tmp_path / "ps1.json"
+    # Check that program set metadata file was created in the series folder
+    series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
+    collection_file = series_folder / "ps1.json"
     assert collection_file.exists()
 
     # Verify it's program set metadata
