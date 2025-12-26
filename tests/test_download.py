@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -163,6 +164,9 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
             def json(self):
                 return {}
 
+            def raise_for_status(self):
+                pass
+
         return _Resp()
 
     def _head(self, url: str, timeout: int | None = None):
@@ -219,6 +223,9 @@ def test_save_nodes_redownloads_incomplete_files(tmp_path: Path, monkeypatch: py
 
             def json(self):
                 return {}
+
+            def raise_for_status(self):
+                pass
 
         return _Resp()
 
@@ -280,6 +287,9 @@ def test_save_nodes_skips_smaller_files(tmp_path: Path, monkeypatch: pytest.Monk
 
             def json(self):
                 return {}
+
+            def raise_for_status(self):
+                pass
 
         return _Resp()
 
@@ -389,6 +399,8 @@ def test_save_nodes_without_programset_title(tmp_path: Path, monkeypatch: pytest
     def _mock_requests_get(self, *args, **kwargs):
         class MockResponse:
             content = b"audio data"
+            def raise_for_status(self):
+                pass
         return MockResponse()
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get)
@@ -494,3 +506,267 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
     assert len(calls) == 1
     assert calls[0][0] == "download_collection"
     assert calls[0][3] is False  # is_editorial flag for program type
+
+
+def test_file_modification_time_set_from_publish_date(tmp_path: Path, mock_requests_get: object) -> None:
+    """Test that file modification time is set from publishDate."""
+    downloader = AudiothekDownloader()
+
+    # Test the _set_file_modification_time method directly
+    test_file = tmp_path / "test.mp3"
+    test_file.write_bytes(b"dummy audio content")
+
+    # Initial modification time should be recent
+    initial_mtime = test_file.stat().st_mtime
+    recent_time = datetime.now().timestamp()
+    assert abs(initial_mtime - recent_time) < 10  # Within 10 seconds
+
+    # Set modification time to a specific publish date
+    publish_date = "2023-12-01T10:00:00.000Z"
+    downloader._set_file_modification_time(str(test_file), publish_date)
+
+    # Check that modification time was updated
+    updated_mtime = test_file.stat().st_mtime
+    expected_time = datetime.fromisoformat("2023-12-01T10:00:00.000+00:00").timestamp()
+
+    # Allow small tolerance for filesystem precision
+    assert abs(updated_mtime - expected_time) < 1
+
+
+def test_extract_audio_url_chooses_larger_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that _extract_audio_url chooses the larger file when sizes differ."""
+    downloader = AudiothekDownloader()
+
+    # Mock content length requests
+    head_calls = {}
+
+    def _mock_head(self, url: str, timeout: int | None = None):
+        head_calls[url] = True
+        class MockResponse:
+            def raise_for_status(self):
+                pass
+            headers = {}
+        response = MockResponse()
+        if "larger" in url:
+            response.headers["content-length"] = "1000"
+        else:
+            response.headers["content-length"] = "500"
+        return response
+
+    monkeypatch.setattr("requests.Session.head", _mock_head)
+
+    node = {
+        "audios": [{
+            "downloadUrl": "https://example.com/smaller.mp3",
+            "url": "https://example.com/larger.mp4"
+        }]
+    }
+
+    chosen_url = downloader._extract_audio_url(node)
+    assert chosen_url == "https://example.com/larger.mp4"
+    assert "https://example.com/smaller.mp3" in head_calls
+    assert "https://example.com/larger.mp4" in head_calls
+
+
+def test_extract_audio_url_chooses_downloadUrl_when_same_size(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that _extract_audio_url chooses downloadUrl when sizes are equal."""
+    downloader = AudiothekDownloader()
+
+    def _mock_head(self, url: str, timeout: int | None = None):
+        class MockResponse:
+            def raise_for_status(self):
+                pass
+            headers = {"content-length": "1000"}
+        return MockResponse()
+
+    monkeypatch.setattr("requests.Session.head", _mock_head)
+
+    node = {
+        "audios": [{
+            "downloadUrl": "https://example.com/audio.mp3",
+            "url": "https://example.com/audio.mp4"
+        }]
+    }
+
+    chosen_url = downloader._extract_audio_url(node)
+    # Should choose downloadUrl when sizes are equal (>= comparison)
+    assert chosen_url == "https://example.com/audio.mp3"
+
+
+def test_get_audio_file_extension() -> None:
+    """Test file extension detection for different audio formats."""
+    downloader = AudiothekDownloader()
+
+    assert downloader._get_audio_file_extension("https://example.com/audio.mp3") == ".mp3"
+    assert downloader._get_audio_file_extension("https://example.com/audio.MP3") == ".mp3"
+    assert downloader._get_audio_file_extension("https://example.com/audio.mp4") == ".mp4"
+    assert downloader._get_audio_file_extension("https://example.com/audio.aac") == ".aac"
+    assert downloader._get_audio_file_extension("https://example.com/audio.m4a") == ".m4a"
+    assert downloader._get_audio_file_extension("https://example.com/audio?format=aac") == ".aac"
+    assert downloader._get_audio_file_extension("https://example.com/audio?format=mp4") == ".mp4"
+    assert downloader._get_audio_file_extension("https://example.com/audio") == ".mp3"  # Default
+
+
+def test_all_files_get_timestamp_from_publish_date(tmp_path: Path, mock_requests_get: object) -> None:
+    """Test that all downloaded files (audio, images, metadata) get timestamps from publishDate."""
+    downloader = AudiothekDownloader()
+
+    # Create test files of different types
+    audio_file = tmp_path / "test_audio.mp3"
+    image_file = tmp_path / "test_image.jpg"
+    metadata_file = tmp_path / "test_metadata.json"
+
+    audio_file.write_bytes(b"dummy audio content")
+    image_file.write_bytes(b"dummy image content")
+    metadata_file.write_text('{"test": "metadata"}')
+
+    # Set modification times for all files
+    publish_date = "2023-11-15T14:30:00.000Z"
+    expected_time = datetime.fromisoformat("2023-11-15T14:30:00.000+00:00").timestamp()
+
+    downloader._set_file_modification_time(str(audio_file), publish_date)
+    downloader._set_file_modification_time(str(image_file), publish_date)
+    downloader._set_file_modification_time(str(metadata_file), publish_date)
+
+    # Check that all files have the correct modification time
+    for file_path in [audio_file, image_file, metadata_file]:
+        file_mtime = file_path.stat().st_mtime
+        assert abs(file_mtime - expected_time) < 1, f"Timestamp not set correctly for {file_path.name}"
+
+
+def test_download_audio_file_handles_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that _download_audio_file returns False for 404 responses."""
+    downloader = AudiothekDownloader()
+
+    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+        return False  # Simulate 404 response
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+
+    audio_file_path = tmp_path / "test.mp3"
+    result = downloader.client._download_audio_to_file("https://example.com/notfound.mp3", str(audio_file_path))
+
+    assert result is False
+    assert not audio_file_path.exists()
+
+
+def test_download_audio_file_handles_error_response_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that _download_audio_file returns False for error response content."""
+    downloader = AudiothekDownloader()
+
+    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+        return False  # Simulate error response content
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+
+    audio_file_path = tmp_path / "test.mp3"
+    result = downloader.client._download_audio_to_file("https://example.com/error.mp3", str(audio_file_path))
+
+    assert result is False
+    assert not audio_file_path.exists()
+
+
+def test_save_audio_file_handles_deleted_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test that _save_audio_file handles deleted/unavailable audio files correctly."""
+    downloader = AudiothekDownloader()
+
+    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+        return False  # Simulate failed download
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+
+    # Create a directory
+    program_dir = tmp_path / "test_program"
+    program_dir.mkdir()
+
+    with caplog.at_level("ERROR"):
+        downloader._save_audio_file(
+            "https://example.com/deleted.mp3",
+            "test_audio",
+            str(program_dir),
+            1,
+            1,
+            "2023-12-01T10:00:00.000Z"
+        )
+
+    # Should log error about failed download
+    assert any("Failed to download audio file" in r.message for r in caplog.records)
+    # Audio file should not exist
+    assert not (program_dir / "test_audio.mp3").exists()
+
+
+def test_save_audio_file_restores_backup_on_download_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test that _save_audio_file restores backup file when download fails."""
+    downloader = AudiothekDownloader()
+
+    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+        return False  # Simulate failed download
+
+    def _mock_check_file_availability(url: str) -> tuple[bool, int | None]:
+        return True, 1000  # Available and larger than existing file to trigger backup
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+    monkeypatch.setattr(downloader.client, "_check_file_availability", _mock_check_file_availability)
+
+    # Create a directory and existing file
+    program_dir = tmp_path / "test_program"
+    program_dir.mkdir()
+    original_file = program_dir / "test_audio.mp3"
+    original_file.write_bytes(b"original content")
+
+    with caplog.at_level("INFO"):
+        downloader._save_audio_file(
+            "https://example.com/larger.mp3",
+            "test_audio",
+            str(program_dir),
+            1,
+            1,
+            "2023-12-01T10:00:00.000Z"
+        )
+
+    # Should log backup creation and restoration
+    log_messages = [r.message for r in caplog.records]
+    assert any("Backed up smaller file to:" in msg for msg in log_messages)
+    assert any("Restored original file from backup:" in msg for msg in log_messages)
+
+    # Original file should be restored
+    assert original_file.exists()
+    assert original_file.read_bytes() == b"original content"
+    # Backup file should be gone
+    assert not (program_dir / "test_audio.mp3.bak").exists()
+
+
+def test_save_audio_file_skips_download_on_404_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test that _save_audio_file skips download when 404 is detected during availability check."""
+    downloader = AudiothekDownloader()
+
+    def _mock_check_file_availability(url: str) -> tuple[bool, int | None]:
+        return False, None  # 404 - not available
+
+    monkeypatch.setattr(downloader.client, "_check_file_availability", _mock_check_file_availability)
+
+    # Create a directory and existing file
+    program_dir = tmp_path / "test_program"
+    program_dir.mkdir()
+    original_file = program_dir / "test_audio.mp3"
+    original_file.write_bytes(b"original content")
+
+    with caplog.at_level("WARNING"):
+        downloader._save_audio_file(
+            "https://example.com/deleted.mp3",
+            "test_audio",
+            str(program_dir),
+            1,
+            1,
+            "2023-12-01T10:00:00.000Z"
+        )
+
+    # Should log 404 warning and keep existing file
+    log_messages = [r.message for r in caplog.records]
+    assert any("Audio file not available (404), keeping existing file:" in msg for msg in log_messages)
+
+    # Original file should remain unchanged
+    assert original_file.exists()
+    assert original_file.read_bytes() == b"original content"
+    # No backup should be created
+    assert not (program_dir / "test_audio.mp3.bak").exists()

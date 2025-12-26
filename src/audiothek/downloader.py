@@ -3,6 +3,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from .client import AudiothekClient
@@ -304,15 +305,18 @@ class AudiothekDownloader:
 
         folder_name = self._program_folder_name(str(programset_id), str(programset_title))
         program_path = os.path.join(folder, folder_name)
-        self._save_collection_data(collection_data, program_path, is_editorial_collection)
+        # Use publish date from first node for collection files
+        first_node_publish_date = first_node.get("publishDate")
+        self._save_collection_data(collection_data, program_path, is_editorial_collection, first_node_publish_date)
 
-    def _save_collection_data(self, collection_data: dict, folder: str, is_editorial_collection: bool) -> None:
+    def _save_collection_data(self, collection_data: dict, folder: str, is_editorial_collection: bool, publish_date: str | None = None) -> None:
         """Save collection metadata as <id>.json in the series/collection folder.
 
         Args:
             collection_data: The collection metadata dictionary
             folder: The series/collection directory to save the JSON file
             is_editorial_collection: Whether this is an editorial collection (True) or program set (False)
+            publish_date: Publish date to set for file modification time
 
         """
         collection_id = collection_data.get("id") or ("collection" if is_editorial_collection else "program_set")
@@ -335,6 +339,8 @@ class AudiothekDownloader:
             else:
                 with open(collection_file_path, "w") as f:
                     json.dump(collection_data, f, indent=4)
+                if publish_date:
+                    self._set_file_modification_time(collection_file_path, publish_date)
                 collection_type = "editorial collection" if is_editorial_collection else "program set"
                 self.logger.info("Saved %s data: %s", collection_type, collection_file_path)
         except Exception as e:
@@ -351,6 +357,8 @@ class AudiothekDownloader:
             if not os.path.exists(image_file_path):
                 try:
                     self._download_to_file(image_url, image_file_path, check_status=True)
+                    if publish_date:
+                        self._set_file_modification_time(image_file_path, publish_date)
                     self.logger.info("Saved %s cover image: %s", collection_type, image_file_path)
                 except Exception as e:
                     self.logger.error("Error downloading %s cover image: %s", collection_type, e)
@@ -392,11 +400,13 @@ class AudiothekDownloader:
 
             # Save images and metadata
             self._save_images_and_metadata(
-                ImageMetadata(node_id=node_id, title=title, filename=filename, program_path=program_path, program_set=program_set, image_urls=image_urls), node
+                ImageMetadata(node_id=node_id, title=title, filename=filename, program_path=program_path, program_set=program_set, image_urls=image_urls),
+                node,
+                node.get("publishDate"),
             )
 
             # Save audio file
-            self._save_audio_file(mp3_url, filename, program_path, index + 1, len(nodes))
+            self._save_audio_file(mp3_url, filename, program_path, index + 1, len(nodes), node.get("publishDate"))
 
     def _extract_image_urls(self, node: dict[str, Any]) -> dict[str, str]:
         """Extract image URLs from node."""
@@ -409,14 +419,47 @@ class AudiothekDownloader:
         return {"image_url": image_url, "image_url_x1": image_url_x1}
 
     def _extract_audio_url(self, node: dict[str, Any]) -> str:
-        """Extract audio URL from node."""
+        """Extract audio URL from node, checking both downloadUrl and url to choose the larger version."""
         audios = node.get("audios") or []
         first_audio = audios[0] if audios and isinstance(audios[0], dict) else None
-        if first_audio:
-            return first_audio.get("downloadUrl") or first_audio.get("url") or ""
-        return ""
+        if not first_audio:
+            return ""
 
-    def _save_images_and_metadata(self, metadata: ImageMetadata, node: dict[str, Any]) -> None:
+        download_url = first_audio.get("downloadUrl") or ""
+        streaming_url = first_audio.get("url") or ""
+
+        # If only one URL is available, return it
+        if not download_url:
+            return streaming_url
+        if not streaming_url:
+            return download_url
+
+        # If both URLs are the same, return either one
+        if download_url == streaming_url:
+            return download_url
+
+        # Get content lengths for both URLs
+        download_size = self.client._get_content_length(download_url)
+        streaming_size = self.client._get_content_length(streaming_url)
+
+        # If we can't determine sizes, prefer downloadUrl (current behavior)
+        if download_size is None and streaming_size is None:
+            return download_url
+
+        # If only one size is available, use that URL
+        if download_size is None:
+            return streaming_url
+        if streaming_size is None:
+            return download_url
+
+        # Use the larger file
+        if download_size >= streaming_size:
+            self.logger.debug("Choosing downloadUrl (%d bytes) over streaming URL (%d bytes) - larger or equal size", download_size, streaming_size)
+            return download_url
+        self.logger.debug("Choosing streaming URL (%d bytes) over downloadUrl (%d bytes) - larger size", streaming_size, download_size)
+        return streaming_url
+
+    def _save_images_and_metadata(self, metadata: ImageMetadata, node: dict[str, Any], publish_date: str | None = None) -> None:
         """Save images and metadata files."""
         # Save images
         image_file_path = os.path.join(metadata.program_path, metadata.filename + ".jpg")
@@ -424,9 +467,13 @@ class AudiothekDownloader:
 
         if metadata.image_urls["image_url"] and not os.path.exists(image_file_path):
             self._download_to_file(metadata.image_urls["image_url"], image_file_path)
+            if publish_date:
+                self._set_file_modification_time(image_file_path, publish_date)
 
         if metadata.image_urls["image_url_x1"] and not os.path.exists(image_file_x1_path):
             self._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path)
+            if publish_date:
+                self._set_file_modification_time(image_file_x1_path, publish_date)
 
         # Save metadata
         meta_file_path = os.path.join(metadata.program_path, metadata.filename + ".json")
@@ -450,49 +497,126 @@ class AudiothekDownloader:
         else:
             with open(meta_file_path, "w") as f:
                 json.dump(data, f, indent=4)
+            if publish_date:
+                self._set_file_modification_time(meta_file_path, publish_date)
 
-    def _save_audio_file(self, mp3_url: str, filename: str, program_path: str, current_index: int, total_count: int) -> None:
-        """Save audio file."""
-        mp3_file_path = os.path.join(program_path, filename + ".mp3")
+    def _save_audio_file(self, audio_url: str, filename: str, program_path: str, current_index: int, total_count: int, publish_date: str | None = None) -> None:
+        """Save audio file with appropriate extension based on URL format."""
+        # Determine file extension based on URL format
+        file_extension = self._get_audio_file_extension(audio_url)
+        audio_file_path = os.path.join(program_path, filename + file_extension)
 
-        self.logger.info("Download: %s of %s -> %s", current_index, total_count, mp3_file_path)
+        self.logger.info("Download: %s of %s -> %s", current_index, total_count, audio_file_path)
 
         # Check if file exists and is complete
         should_download = True
-        if os.path.exists(mp3_file_path):
-            # Get expected content length via HEAD request
-            expected_length = self.client._get_content_length(mp3_url)
-            if expected_length:
+        if os.path.exists(audio_file_path):
+            # Check file availability and get content length
+            is_available, expected_length = self.client._check_file_availability(audio_url)
+            if not is_available:
+                self.logger.warning("Audio file not available (404), keeping existing file: %s", audio_file_path)
+                should_download = False
+            elif expected_length:
                 # Get current file size
-                current_size = os.path.getsize(mp3_file_path)
+                current_size = os.path.getsize(audio_file_path)
                 if current_size == expected_length:
-                    self.logger.info("File already exists and is complete: %s", mp3_file_path)
+                    self.logger.info("File already exists and is complete: %s", audio_file_path)
                     should_download = False
                 elif expected_length > current_size:
                     self.logger.info(
-                        "New version is larger than existing file (%s/%s bytes), will backup and re-download: %s", current_size, expected_length, mp3_file_path
+                        "New version is larger than existing file (%s/%s bytes), will backup and re-download: %s",
+                        current_size,
+                        expected_length,
+                        audio_file_path,
                     )
                     # Rename old file to .bak
-                    backup_path = mp3_file_path + ".bak"
+                    backup_path = audio_file_path + ".bak"
                     try:
-                        os.rename(mp3_file_path, backup_path)
+                        os.rename(audio_file_path, backup_path)
                         self.logger.info("Backed up smaller file to: %s", backup_path)
                     except Exception as e:
                         self.logger.error("Failed to backup file: %s", e)
                 else:
                     self.logger.info(
-                        "New version is smaller than existing file (%s/%s bytes), will keep existing file: %s", current_size, expected_length, mp3_file_path
+                        "New version is smaller than existing file (%s/%s bytes), will keep existing file: %s", current_size, expected_length, audio_file_path
                     )
                     should_download = False
             else:
-                self.logger.info("Could not determine content length, will backup existing file: %s", mp3_file_path)
+                self.logger.info("Could not determine content length, will backup existing file: %s", audio_file_path)
                 # Rename old file to .bak
-                backup_path = mp3_file_path + ".bak"
+                backup_path = audio_file_path + ".bak"
                 try:
-                    os.rename(mp3_file_path, backup_path)
+                    os.rename(audio_file_path, backup_path)
                     self.logger.info("Backed up existing file to: %s", backup_path)
                 except Exception as e:
                     self.logger.error("Failed to backup file: %s", e)
 
         if should_download:
-            self._download_to_file(mp3_url, mp3_file_path)
+            download_success = self.client._download_audio_to_file(audio_url, audio_file_path)
+            if download_success:
+                # Set file modification time to publish date if available
+                if publish_date:
+                    self._set_file_modification_time(audio_file_path, publish_date)
+            else:
+                self.logger.error("Failed to download audio file (file not found or unavailable): %s", audio_url)
+                # Remove any partially downloaded file
+                if os.path.exists(audio_file_path):
+                    try:
+                        os.remove(audio_file_path)
+                        self.logger.info("Removed invalid audio file: %s", audio_file_path)
+                    except Exception as e:
+                        self.logger.error("Failed to remove invalid audio file: %s", e)
+
+                # Restore backup file if it exists
+                backup_path = audio_file_path + ".bak"
+                if os.path.exists(backup_path):
+                    try:
+                        os.rename(backup_path, audio_file_path)
+                        self.logger.info("Restored original file from backup: %s", audio_file_path)
+                    except Exception as e:
+                        self.logger.error("Failed to restore backup file: %s", e)
+
+    def _get_audio_file_extension(self, url: str) -> str:
+        """Get the appropriate file extension for an audio URL."""
+        url_lower = url.lower()
+        if url_lower.endswith(".mp4"):
+            return ".mp4"
+        elif url_lower.endswith(".aac"):
+            return ".aac"
+        elif url_lower.endswith(".m4a"):
+            return ".m4a"
+        elif url_lower.endswith(".mp3"):
+            return ".mp3"
+        elif "aac" in url_lower:
+            return ".aac"
+        elif "mp4" in url_lower:
+            return ".mp4"
+        else:
+            # Default to .mp3 for backward compatibility
+            return ".mp3"
+
+    def _set_file_modification_time(self, file_path: str, publish_date: str) -> None:
+        """Set file modification time based on publish date.
+
+        Args:
+            file_path: Path to the file to modify
+            publish_date: Publish date string from the API
+
+        """
+        try:
+            # Parse the publish date - ARD Audiothek typically uses ISO 8601 format
+            # Example: "2023-12-01T10:00:00.000Z" or "2023-12-01T10:00:00Z"
+            if publish_date.endswith("Z"):
+                # Handle UTC timestamp
+                dt = datetime.fromisoformat(publish_date.replace("Z", "+00:00"))
+            else:
+                # Handle timestamp without timezone info
+                dt = datetime.fromisoformat(publish_date)
+
+            # Convert to timestamp and set file modification time
+            timestamp = dt.timestamp()
+            os.utime(file_path, (timestamp, timestamp))
+            self.logger.debug("Set file modification time for %s to %s", file_path, publish_date)
+
+        except (ValueError, OSError) as e:
+            self.logger.warning("Failed to set file modification time for %s: %s", file_path, e)

@@ -45,14 +45,79 @@ class AudiothekClient:
         with open(file_path, "wb") as f:
             f.write(response.content)
 
+    def _download_audio_to_file(self, url: str, file_path: str) -> bool:
+        """Download audio content from URL to file with validation.
+
+        Args:
+            url: The URL to download from
+            file_path: The local file path to save to
+
+        Returns:
+            True if download was successful, False if file was not found or invalid
+
+        Raises:
+            requests.HTTPError: For HTTP errors other than 404
+
+        """
+        try:
+            response = self._session.get(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                self.logger.warning("Audio file not found (404): %s", url)
+                return False
+            else:
+                self.logger.error("HTTP error downloading audio: %s - %s", url, e)
+                raise
+
+        # Check if content is likely an error response rather than audio
+        content = response.content
+        if len(content) < 1000:  # Very small files are likely error responses
+            content_text = content.decode("utf-8", errors="ignore").lower()
+            if any(error_indicator in content_text for error_indicator in ["not found", "error", "deleted", "removed", "unavailable", "404"]):
+                self.logger.warning("Audio file appears to be unavailable (error response): %s - Content: %s", url, content_text[:100])
+                return False
+
+        # Save the valid audio content
+        with open(file_path, "wb") as f:
+            f.write(content)
+        return True
+
     def _get_content_length(self, url: str) -> int | None:
         """Get content length from URL using HEAD request."""
         try:
             response = self._session.head(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
             return int(response.headers.get("content-length", 0))
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                self.logger.warning("Audio file not found (404) during content length check: %s", url)
+            return None
         except Exception:
             return None
+
+    def _check_file_availability(self, url: str) -> tuple[bool, int | None]:
+        """Check if file is available and get content length.
+
+        Returns:
+            Tuple of (is_available, content_length_or_none)
+            is_available is False for 404s, True for other cases
+
+        """
+        try:
+            response = self._session.head(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return True, int(response.headers.get("content-length", 0))
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                self.logger.warning("Audio file not found (404) during availability check: %s", url)
+                return False, None
+            else:
+                # Other HTTP errors - file might be available, just can't check length
+                return True, None
+        except Exception:
+            # Network errors - assume file might be available
+            return True, None
 
     def find_program_sets_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Find program sets by editorial category ID."""
