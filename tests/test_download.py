@@ -417,16 +417,15 @@ def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.M
 
     calls = []
 
-    def _mock_download_from_id(self, resource_id, folder):
-        calls.append(("download_from_id", resource_id, folder))
-
     def _mock_download_single_episode(self, episode_id, folder):
         calls.append(("download_single_episode", episode_id, folder))
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("program", rid))
+    # Mock client method instead of downloader wrapper
+    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", lambda rid: ("program", rid))
+
     monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
@@ -450,7 +449,9 @@ def test_download_from_id_with_custom_folder(tmp_path: Path, monkeypatch: pytest
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("episode", rid))
+    # Mock client method instead of downloader wrapper
+    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", lambda rid: ("episode", rid))
+
     monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
@@ -471,13 +472,17 @@ def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    def _mock_determine_resource_type_from_id(self, resource_id):
-        return "collection", resource_id
+    def _mock_parse_url(url):
+        return "collection", "test_id"
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    # Mock client method instead of downloader wrapper (note: parse_url is static in client but used as instance method if not careful,
+    # but here we mock it on the instance's client or class)
+    # Since parse_url is static, we can mock it on the class or instance.
+    monkeypatch.setattr(downloader.client, "parse_url", _mock_parse_url)
+
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
-    downloader.download_from_id("test_id")
+    downloader.download_from_url("https://example.com/test")
 
     # Should have called download_collection with is_editorial=True for collection
     assert len(calls) == 1
@@ -494,10 +499,12 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    def _mock_parse_url(self, url):
+    def _mock_parse_url(url):
         return "program", "test_id"
 
-    monkeypatch.setattr(AudiothekDownloader, "_parse_url", _mock_parse_url)
+    # Mock client method instead of downloader wrapper
+    monkeypatch.setattr(downloader.client, "parse_url", _mock_parse_url)
+
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     downloader.download_from_url("https://example.com/test", str(tmp_path))
@@ -562,8 +569,10 @@ def test_extract_audio_url_chooses_larger_file(tmp_path: Path, monkeypatch: pyte
         }]
     }
 
-    chosen_url = downloader._extract_audio_url(node)
-    assert chosen_url == "https://example.com/larger.mp4"
+    audio_urls = downloader._extract_audio_url(node)
+    assert len(audio_urls) >= 2
+    assert audio_urls[0] == "https://example.com/larger.mp4"
+    assert audio_urls[1] == "https://example.com/smaller.mp3"
     assert "https://example.com/smaller.mp3" in head_calls
     assert "https://example.com/larger.mp4" in head_calls
 
@@ -588,9 +597,11 @@ def test_extract_audio_url_chooses_downloadUrl_when_same_size(tmp_path: Path, mo
         }]
     }
 
-    chosen_url = downloader._extract_audio_url(node)
+    audio_urls = downloader._extract_audio_url(node)
     # Should choose downloadUrl when sizes are equal (>= comparison)
-    assert chosen_url == "https://example.com/audio.mp3"
+    assert len(audio_urls) >= 2
+    assert audio_urls[0] == "https://example.com/audio.mp3"
+    assert audio_urls[1] == "https://example.com/audio.mp4"
 
 
 def test_get_audio_file_extension() -> None:
@@ -670,7 +681,7 @@ def test_save_audio_file_handles_deleted_file(tmp_path: Path, monkeypatch: pytes
     """Test that _save_audio_file handles deleted/unavailable audio files correctly."""
     downloader = AudiothekDownloader()
 
-    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+    def _mock_download_audio_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
         return False  # Simulate failed download
 
     monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
@@ -681,7 +692,7 @@ def test_save_audio_file_handles_deleted_file(tmp_path: Path, monkeypatch: pytes
 
     with caplog.at_level("ERROR"):
         downloader._save_audio_file(
-            "https://example.com/deleted.mp3",
+            ["https://example.com/deleted.mp3", "https://example.com/fallback.mp3"],
             "test_audio",
             str(program_dir),
             1,
@@ -699,7 +710,7 @@ def test_save_audio_file_restores_backup_on_download_failure(tmp_path: Path, mon
     """Test that _save_audio_file restores backup file when download fails."""
     downloader = AudiothekDownloader()
 
-    def _mock_download_audio_file(url: str, file_path: str) -> bool:
+    def _mock_download_audio_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
         return False  # Simulate failed download
 
     def _mock_check_file_availability(url: str) -> tuple[bool, int | None]:
@@ -716,7 +727,7 @@ def test_save_audio_file_restores_backup_on_download_failure(tmp_path: Path, mon
 
     with caplog.at_level("INFO"):
         downloader._save_audio_file(
-            "https://example.com/larger.mp3",
+            ["https://example.com/larger.mp3", "https://example.com/fallback.mp3"],
             "test_audio",
             str(program_dir),
             1,
@@ -753,7 +764,7 @@ def test_save_audio_file_skips_download_on_404_check(tmp_path: Path, monkeypatch
 
     with caplog.at_level("WARNING"):
         downloader._save_audio_file(
-            "https://example.com/deleted.mp3",
+            ["https://example.com/deleted.mp3", "https://example.com/fallback.mp3"],
             "test_audio",
             str(program_dir),
             1,
@@ -770,3 +781,44 @@ def test_save_audio_file_skips_download_on_404_check(tmp_path: Path, monkeypatch
     assert original_file.read_bytes() == b"original content"
     # No backup should be created
     assert not (program_dir / "test_audio.mp3.bak").exists()
+
+
+def test_download_audio_file_uses_fallback_on_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test that _download_audio_to_file uses fallback URL when primary URL returns 404."""
+    from audiothek.client import AudiothekClient
+    client = AudiothekClient()
+
+    call_count = 0
+
+    def _mock_get(self, url: str, timeout: int | None = None):
+        nonlocal call_count
+        call_count += 1
+
+        class MockResponse:
+            content = b"valid audio content"
+
+            def raise_for_status(self):
+                if url == "https://example.com/primary.mp3":
+                    # Primary URL - simulate 404
+                    # Create a mock response object that has status_code
+                    response = requests.Response()
+                    response.status_code = 404
+                    raise requests.HTTPError(response=response)
+                # Fallback URL succeeds
+
+        return MockResponse()
+
+    monkeypatch.setattr("requests.Session.get", _mock_get)
+
+    with caplog.at_level("INFO"):
+        audio_file_path = tmp_path / "test.mp3"
+        result = client._download_audio_to_file("https://example.com/primary.mp3", str(audio_file_path), "https://example.com/fallback.mp3")
+
+    assert result is True
+    assert audio_file_path.exists()
+    assert audio_file_path.read_bytes() == b"valid audio content"
+
+    # Should log fallback usage
+    log_messages = [r.message for r in caplog.records]
+    assert any("Trying fallback URL:" in msg for msg in log_messages)
+    assert any("Successfully downloaded from fallback URL:" in msg for msg in log_messages)

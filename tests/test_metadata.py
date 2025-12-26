@@ -157,13 +157,13 @@ def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: 
 
 
 def test_get_program_title_unknown_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_title with unknown resource type."""
-    downloader = AudiothekDownloader()
+    """Test get_title with unknown resource type."""
+    client = AudiothekClient()
 
-    # Mock _determine_resource_type_from_id to return None
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: None)
+    # Mock determine_resource_type_from_id to return None
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", lambda rid: None)
 
-    result = downloader._get_program_title("unknown_id", "unknown")
+    result = client.get_title("unknown_id", "unknown")
     assert result is None
 
 

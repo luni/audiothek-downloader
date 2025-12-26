@@ -110,12 +110,12 @@ def _process_request(request: DownloadRequest) -> None:
 
     if request.editorial_category_id:
         if request.search_type in {"program-sets", "all"}:
-            program_sets = downloader.find_program_sets_by_editorial_category_id(request.editorial_category_id)
+            program_sets = downloader.client.find_program_sets_by_editorial_category_id(request.editorial_category_id)
             for program_set in program_sets:
                 print(program_set)
 
         if request.search_type in {"collections", "all"}:
-            collections = downloader.find_editorial_collections_by_editorial_category_id(request.editorial_category_id)
+            collections = downloader.client.find_editorial_collections_by_editorial_category_id(request.editorial_category_id)
             for collection in collections:
                 print(collection)
         return

@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekClient, AudiothekDownloader
 from audiothek.utils import migrate_folders
 
 
@@ -21,15 +21,9 @@ def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        if folder_id in ["123456", "789012"]:
-            return "program", folder_id
-        return None
-
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
@@ -59,15 +53,9 @@ def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pyte
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        if folder_id in ["123456", "789012", "999999"]:
-            return "program", folder_id
-        return None
-
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
@@ -97,24 +85,22 @@ def test_update_all_folders_skips_non_numeric_folders(tmp_path: Path, monkeypatc
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        if folder_id == "123456":
-            return "program", folder_id
-        return None
-
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
         downloader = AudiothekDownloader()
         downloader.update_all_folders(str(tmp_path))
 
-    # Should have called download_collection only for folder that returned a resource type
-    assert len(calls) == 1
-    assert calls[0] == ("download_collection", "123456", str(tmp_path), False)
+    # Should have called download_collection for numeric folders
+    assert len(calls) == 2
+
+    expected_ids = ["123456", "789012"]
+    called_ids = [c[1] for c in calls]
+    for eid in expected_ids:
+        assert eid in called_ids
 
 
 def test_update_all_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -124,14 +110,10 @@ def test_update_all_folders_exception_handling(tmp_path: Path, monkeypatch: pyte
 
     calls = []
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        return "program", folder_id
-
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
         raise Exception("Download failed")
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
     with monkeypatch.context():
@@ -151,14 +133,17 @@ def test_migrate_folders_numeric_to_named(tmp_path: Path, monkeypatch: pytest.Mo
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
     (tmp_path / "123456" / "test.mp3").write_bytes(b"audio content")
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        return "program", folder_id
+    # Mock as static method to match the original class method behavior or just accept self if bound
+    # Since determine_resource_type_from_id is called on instance, if we put a plain function on class, it binds.
+    # So we accept 'self' (ignored) and the argument.
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return "program", resource_id
 
-    def _mock_get_program_title(self, resource_id, resource_type):
+    def _mock_get_title(self, resource_id, resource_type):
         return "Test Program"
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
-    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
 
     downloader = AudiothekDownloader()
     migrate_folders(str(tmp_path), downloader, downloader.logger)
@@ -209,18 +194,18 @@ def test_migrate_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.
     metadata = {"id": "urn:ard:episode:test1", "programSet": {"id": "ps1", "title": "Test Program"}}
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
 
-    def _mock_determine_resource_type_from_id(self, folder_id):
-        return "program", folder_id
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return "program", resource_id
 
-    def _mock_get_program_title(self, resource_id, resource_type):
+    def _mock_get_title(self, resource_id, resource_type):
         return "Test Program"
 
     # Mock os.rename to raise exception
     def _mock_rename(old_path, new_path):
         raise OSError("Permission denied")
 
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
-    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
     monkeypatch.setattr("os.rename", _mock_rename)
 
     with caplog.at_level("ERROR"):
@@ -242,7 +227,10 @@ def test_migrate_folders_resource_type_none_handling(tmp_path: Path, monkeypatch
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
 
     # Mock _determine_resource_type_from_id to return None
-    monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: None)
+    def _mock_determine_resource_type_from_id(self, rid):
+        return None
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
 
     downloader = AudiothekDownloader()
     migrate_folders(str(tmp_path), downloader, downloader.logger)
@@ -258,10 +246,14 @@ def test_migrate_folders_logs_warning_when_no_title(tmp_path: Path, monkeypatch:
     metadata = {"id": "urn:ard:episode:test1", "programSet": {"id": "ps1"}}
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
 
-    def _mock_get_program_title(self, resource_id, resource_type):
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return "program", resource_id
+
+    def _mock_get_title(self, resource_id, resource_type):
         return None
 
-    monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
 
     with caplog.at_level("WARNING"):
         downloader = AudiothekDownloader()

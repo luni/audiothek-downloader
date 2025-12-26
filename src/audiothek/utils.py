@@ -76,7 +76,7 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
                     logger.info("Found old format folder: %s", item)
 
                     # Try to get the program title by making a request
-                    resource_result = downloader._determine_resource_type_from_id(item)
+                    resource_result = downloader.client.determine_resource_type_from_id(item)
                     if not resource_result:
                         logger.warning("Could not determine resource type for folder: %s", item)
                         continue
@@ -84,7 +84,7 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
                     resource_type, parsed_id = resource_result
 
                     # Get program information to extract the title
-                    title = downloader._get_program_title(parsed_id, resource_type)
+                    title = downloader.client.get_title(parsed_id, resource_type)
                     if title:
                         # Create new folder name with ID and title
                         new_folder_name = f"{item} {sanitize_folder_name(title)}"

@@ -45,18 +45,15 @@ class AudiothekClient:
         with open(file_path, "wb") as f:
             f.write(response.content)
 
-    def _download_audio_to_file(self, url: str, file_path: str) -> bool:
-        """Download audio content from URL to file with validation.
+    def _fetch_and_validate_audio(self, url: str) -> bytes | None:
+        """Fetch audio content and validate it's not an error response.
 
         Args:
-            url: The URL to download from
-            file_path: The local file path to save to
+            url: The URL to fetch
 
         Returns:
-            True if download was successful, False if file was not found or invalid
-
-        Raises:
-            requests.HTTPError: For HTTP errors other than 404
+            The content bytes if valid audio, None if 404 or soft 404 (error text),
+            raises HTTPError for other errors.
 
         """
         try:
@@ -65,10 +62,9 @@ class AudiothekClient:
         except requests.HTTPError as e:
             if e.response.status_code == 404:
                 self.logger.warning("Audio file not found (404): %s", url)
-                return False
-            else:
-                self.logger.error("HTTP error downloading audio: %s - %s", url, e)
-                raise
+                return None
+            self.logger.error("HTTP error downloading audio: %s - %s", url, e)
+            raise
 
         # Check if content is likely an error response rather than audio
         content = response.content
@@ -76,7 +72,42 @@ class AudiothekClient:
             content_text = content.decode("utf-8", errors="ignore").lower()
             if any(error_indicator in content_text for error_indicator in ["not found", "error", "deleted", "removed", "unavailable", "404"]):
                 self.logger.warning("Audio file appears to be unavailable (error response): %s - Content: %s", url, content_text[:100])
-                return False
+                return None
+
+        return content
+
+    def _download_audio_to_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
+        """Download audio content from URL to file with validation.
+
+        Args:
+            url: The URL to download from
+            file_path: The local file path to save to
+            fallback_url: Optional fallback URL to try if primary URL fails with 404
+
+        Returns:
+            True if download was successful, False if file was not found or invalid
+
+        Raises:
+            requests.HTTPError: For HTTP errors other than 404
+
+        """
+        content = self._fetch_and_validate_audio(url)
+
+        if content is None:
+            if fallback_url and fallback_url != url:
+                self.logger.info("Trying fallback URL: %s", fallback_url)
+                try:
+                    content = self._fetch_and_validate_audio(fallback_url)
+                    if content:
+                        self.logger.info("Successfully downloaded from fallback URL: %s", fallback_url)
+                    else:
+                        self.logger.warning("Fallback URL also appears to be unavailable: %s", fallback_url)
+                except Exception as e:
+                    self.logger.error("Error downloading fallback audio: %s - %s", fallback_url, e)
+                    content = None
+
+        if content is None:
+            return False
 
         # Save the valid audio content
         with open(file_path, "wb") as f:
@@ -217,6 +248,23 @@ class AudiothekClient:
         except Exception as e:
             self.logger.error("Error getting program set title: %s", e)
 
+        return None
+
+    def get_title(self, resource_id: str, resource_type: str) -> str | None:
+        """Get title for a resource based on its type.
+
+        Args:
+            resource_id: The resource ID
+            resource_type: The resource type ('episode', 'program', or 'collection')
+
+        Returns:
+            The title or None if not found
+
+        """
+        if resource_type == "episode":
+            return self.get_episode_title(resource_id)
+        elif resource_type in ["program", "collection"]:
+            return self.get_program_set_title(resource_id)
         return None
 
     @staticmethod

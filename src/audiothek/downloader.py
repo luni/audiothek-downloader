@@ -43,14 +43,6 @@ class AudiothekDownloader:
             return f"{programset_id} {sanitize_folder_name(programset_title)}"
         return programset_id
 
-    def _graphql_get(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        """Execute GraphQL query using client."""
-        return self.client._graphql_get(query, variables)
-
-    def _download_to_file(self, url: str, file_path: str, *, check_status: bool = False) -> None:
-        """Download content using client."""
-        self.client._download_to_file(url, file_path, check_status=check_status)
-
     def _should_skip_json_write(self, file_path: str, new_data: dict[str, Any]) -> bool:
         """Check if JSON file should be skipped because content is the same.
 
@@ -73,14 +65,6 @@ class AudiothekDownloader:
             # If file is corrupted or can't be read, don't skip
             return False
 
-    def find_program_sets_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
-        """Find program sets by editorial category ID."""
-        return self.client.find_program_sets_by_editorial_category_id(editorial_category_id, limit)
-
-    def find_editorial_collections_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
-        """Find editorial collections by editorial category ID."""
-        return self.client.find_editorial_collections_by_editorial_category_id(editorial_category_id, limit)
-
     def download_from_url(self, url: str, folder: str | None = None) -> None:
         """Download content from an ARD Audiothek URL.
 
@@ -90,7 +74,7 @@ class AudiothekDownloader:
 
         """
         target_folder = folder or self.base_folder
-        resource = self._parse_url(url)
+        resource = self.client.parse_url(url)
         if not resource:
             self.logger.error("Could not determine resource ID from URL.")
             return
@@ -110,7 +94,7 @@ class AudiothekDownloader:
 
         """
         target_folder = folder or self.base_folder
-        resource = self._determine_resource_type_from_id(resource_id)
+        resource = self.client.determine_resource_type_from_id(resource_id)
         if not resource:
             self.logger.error("Could not determine resource type from ID.")
             return
@@ -172,14 +156,6 @@ class AudiothekDownloader:
             return self.client.get_program_set_title(resource_id)
         return None
 
-    def _determine_resource_type_from_id(self, resource_id: str) -> tuple[str, str] | None:
-        """Determine resource type from ID pattern using client."""
-        return self.client.determine_resource_type_from_id(resource_id)
-
-    def _parse_url(self, url: str) -> tuple[str, str] | None:
-        """Parse Audiothek URL and return (resource_type, id) using client."""
-        return self.client.parse_url(url)
-
     def _download_single_episode(self, episode_id: str, folder: str) -> None:
         """Fetch and store a single episode.
 
@@ -189,7 +165,7 @@ class AudiothekDownloader:
 
         """
         query = load_graphql_query("EpisodeQuery.graphql")
-        response_json = self._graphql_get(query, {"id": episode_id})
+        response_json = self.client._graphql_get(query, {"id": episode_id})
 
         node = response_json.get("data", {}).get("result")
         if not node:
@@ -252,7 +228,7 @@ class AudiothekDownloader:
 
         while True:
             variables = {"id": resource_id, "offset": offset, "count": count}
-            response_json = self._graphql_get(query, variables)
+            response_json = self.client._graphql_get(query, variables)
 
             results = response_json.get("data", {}).get("result", {})
             if not results:
@@ -356,7 +332,7 @@ class AudiothekDownloader:
             image_file_path = os.path.join(folder, f"{collection_id}.jpg")
             if not os.path.exists(image_file_path):
                 try:
-                    self._download_to_file(image_url, image_file_path, check_status=True)
+                    self.client._download_to_file(image_url, image_file_path, check_status=True)
                     if publish_date:
                         self._set_file_modification_time(image_file_path, publish_date)
                     self.logger.info("Saved %s cover image: %s", collection_type, image_file_path)
@@ -376,8 +352,8 @@ class AudiothekDownloader:
 
             # Extract URLs from node
             image_urls = self._extract_image_urls(node)
-            mp3_url = self._extract_audio_url(node)
-            if not mp3_url:
+            audio_urls = self._extract_audio_url(node)
+            if not audio_urls:
                 self.logger.warning("No audio URL found for node %s", node_id)
                 continue
 
@@ -406,7 +382,7 @@ class AudiothekDownloader:
             )
 
             # Save audio file
-            self._save_audio_file(mp3_url, filename, program_path, index + 1, len(nodes), node.get("publishDate"))
+            self._save_audio_file(audio_urls, filename, program_path, index + 1, len(nodes), node.get("publishDate"))
 
     def _extract_image_urls(self, node: dict[str, Any]) -> dict[str, str]:
         """Extract image URLs from node."""
@@ -418,46 +394,92 @@ class AudiothekDownloader:
 
         return {"image_url": image_url, "image_url_x1": image_url_x1}
 
-    def _extract_audio_url(self, node: dict[str, Any]) -> str:
-        """Extract audio URL from node, checking both downloadUrl and url to choose the larger version."""
+    def _extract_audio_url(self, node: dict[str, Any]) -> list[str]:
+        """Extract audio URLs from node, returning URLs in priority order.
+
+        Returns:
+            List of URLs ordered from highest to lowest priority
+
+        """
         audios = node.get("audios") or []
-        first_audio = audios[0] if audios and isinstance(audios[0], dict) else None
-        if not first_audio:
-            return ""
+        if not audios:
+            return []
 
-        download_url = first_audio.get("downloadUrl") or ""
-        streaming_url = first_audio.get("url") or ""
+        # Collect all available URLs from all audio elements
+        download_urls = []
+        streaming_urls = []
 
-        # If only one URL is available, return it
-        if not download_url:
-            return streaming_url
-        if not streaming_url:
-            return download_url
+        for audio in audios:
+            if isinstance(audio, dict):
+                download_url = audio.get("downloadUrl")
+                streaming_url = audio.get("url")
 
-        # If both URLs are the same, return either one
-        if download_url == streaming_url:
-            return download_url
+                if download_url:
+                    download_urls.append(download_url)
+                if streaming_url:
+                    streaming_urls.append(streaming_url)
 
-        # Get content lengths for both URLs
-        download_size = self.client._get_content_length(download_url)
-        streaming_size = self.client._get_content_length(streaming_url)
+        # Debug output
+        self.logger.debug("Found %d download URLs: %s", len(download_urls), download_urls)
+        self.logger.debug("Found %d streaming URLs: %s", len(streaming_urls), streaming_urls)
 
-        # If we can't determine sizes, prefer downloadUrl (current behavior)
-        if download_size is None and streaming_size is None:
-            return download_url
+        # Remove duplicates while preserving order
+        download_urls = list(dict.fromkeys(download_urls))
+        streaming_urls = list(dict.fromkeys(streaming_urls))
 
-        # If only one size is available, use that URL
-        if download_size is None:
-            return streaming_url
-        if streaming_size is None:
-            return download_url
+        # If no URLs found, return empty list
+        if not download_urls and not streaming_urls:
+            return []
 
-        # Use the larger file
-        if download_size >= streaming_size:
-            self.logger.debug("Choosing downloadUrl (%d bytes) over streaming URL (%d bytes) - larger or equal size", download_size, streaming_size)
-            return download_url
-        self.logger.debug("Choosing streaming URL (%d bytes) over downloadUrl (%d bytes) - larger size", streaming_size, download_size)
-        return streaming_url
+        # If only one type of URL available, return all available URLs
+        if not download_urls:
+            return streaming_urls
+        if not streaming_urls:
+            return download_urls
+
+        # Get content lengths for all URLs to find the best combination
+        url_candidates = []
+
+        # Check download URLs
+        for url in download_urls:
+            size = self.client._get_content_length(url)
+            if size is not None:
+                url_candidates.append(("download", url, size))
+
+        # Check streaming URLs
+        for url in streaming_urls:
+            size = self.client._get_content_length(url)
+            if size is not None:
+                url_candidates.append(("streaming", url, size))
+
+        # Sort by size (descending) to prefer larger files
+        url_candidates.sort(key=lambda x: x[2], reverse=True)
+
+        if not url_candidates:
+            # If we couldn't determine sizes, return all available URLs
+            all_urls = download_urls + streaming_urls
+            return list(dict.fromkeys(all_urls))
+
+        # Create priority list: start with preferred URL, then add remaining URLs sorted by size
+        preferred_type, preferred_url, preferred_size = url_candidates[0]
+        priority_urls = [preferred_url]
+
+        # Add remaining URLs sorted by size (excluding preferred)
+        remaining_candidates = [(url_type, url, size) for url_type, url, size in url_candidates[1:] if url != preferred_url]
+        remaining_candidates.sort(key=lambda x: x[2], reverse=True)
+
+        for url_type, url, size in remaining_candidates:
+            if url not in priority_urls:
+                priority_urls.append(url)
+
+        # Add any URLs that weren't in candidates (couldn't get size)
+        all_urls = download_urls + streaming_urls
+        for url in all_urls:
+            if url not in priority_urls:
+                priority_urls.append(url)
+
+        self.logger.debug("Chosen URLs in priority order: %s", priority_urls)
+        return priority_urls
 
     def _save_images_and_metadata(self, metadata: ImageMetadata, node: dict[str, Any], publish_date: str | None = None) -> None:
         """Save images and metadata files."""
@@ -466,12 +488,12 @@ class AudiothekDownloader:
         image_file_x1_path = os.path.join(metadata.program_path, metadata.filename + "_x1.jpg")
 
         if metadata.image_urls["image_url"] and not os.path.exists(image_file_path):
-            self._download_to_file(metadata.image_urls["image_url"], image_file_path)
+            self.client._download_to_file(metadata.image_urls["image_url"], image_file_path)
             if publish_date:
                 self._set_file_modification_time(image_file_path, publish_date)
 
         if metadata.image_urls["image_url_x1"] and not os.path.exists(image_file_x1_path):
-            self._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path)
+            self.client._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path)
             if publish_date:
                 self._set_file_modification_time(image_file_x1_path, publish_date)
 
@@ -500,10 +522,20 @@ class AudiothekDownloader:
             if publish_date:
                 self._set_file_modification_time(meta_file_path, publish_date)
 
-    def _save_audio_file(self, audio_url: str, filename: str, program_path: str, current_index: int, total_count: int, publish_date: str | None = None) -> None:
+    def _save_audio_file(
+        self, audio_urls: list[str], filename: str, program_path: str, current_index: int, total_count: int, publish_date: str | None = None
+    ) -> None:
         """Save audio file with appropriate extension based on URL format."""
+        if not audio_urls:
+            self.logger.error("No audio URLs provided")
+            return
+
+        # Use the first (highest priority) URL
+        preferred_url = audio_urls[0]
+        # Use the second URL as fallback if available, otherwise use the first
+        fallback_url = audio_urls[1] if len(audio_urls) > 1 else audio_urls[0]
         # Determine file extension based on URL format
-        file_extension = self._get_audio_file_extension(audio_url)
+        file_extension = self._get_audio_file_extension(preferred_url)
         audio_file_path = os.path.join(program_path, filename + file_extension)
 
         self.logger.info("Download: %s of %s -> %s", current_index, total_count, audio_file_path)
@@ -512,7 +544,7 @@ class AudiothekDownloader:
         should_download = True
         if os.path.exists(audio_file_path):
             # Check file availability and get content length
-            is_available, expected_length = self.client._check_file_availability(audio_url)
+            is_available, expected_length = self.client._check_file_availability(preferred_url)
             if not is_available:
                 self.logger.warning("Audio file not available (404), keeping existing file: %s", audio_file_path)
                 should_download = False
@@ -552,13 +584,13 @@ class AudiothekDownloader:
                     self.logger.error("Failed to backup file: %s", e)
 
         if should_download:
-            download_success = self.client._download_audio_to_file(audio_url, audio_file_path)
+            download_success = self.client._download_audio_to_file(preferred_url, audio_file_path, fallback_url)
             if download_success:
                 # Set file modification time to publish date if available
                 if publish_date:
                     self._set_file_modification_time(audio_file_path, publish_date)
             else:
-                self.logger.error("Failed to download audio file (file not found or unavailable): %s", audio_url)
+                self.logger.error("Failed to download audio file (file not found or unavailable): %s", preferred_url)
                 # Remove any partially downloaded file
                 if os.path.exists(audio_file_path):
                     try:
