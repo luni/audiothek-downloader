@@ -508,7 +508,7 @@ def test_save_collection_data_skips_unchanged_content(tmp_path: Path, monkeypatc
     # Get original modification time
     original_mtime = collection_file.stat().st_mtime
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("DEBUG"):
         downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
     # Check that file was not modified (modification time unchanged)
@@ -542,7 +542,7 @@ def test_save_collection_data_writes_changed_content(tmp_path: Path, monkeypatch
         "editorialDescription": "Test editorial description"
     }
 
-    with caplog.at_level("INFO"):
+    with caplog.at_level("DEBUG"):
         downloader._save_collection_data(new_data, str(tmp_path), is_editorial_collection=True)
 
     # Check that file was modified (modification time changed)
