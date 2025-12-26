@@ -168,13 +168,13 @@ def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql
 
 
 def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    def _mock_get(url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None):
         class _Resp:
             def json(self):
                 return {"data": {"result": None}}
         return _Resp()
 
-    monkeypatch.setattr("requests.get", _mock_get)
+    monkeypatch.setattr("requests.Session.get", _mock_get)
 
     with caplog.at_level("ERROR"):
         downloader = AudiothekDownloader()
@@ -197,13 +197,13 @@ def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
 
 
 def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, graphql_mock: GraphQLMock) -> None:
-    def _mock_get(url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None):
         if url == "https://api.ardaudiothek.de/graphql":
             # Return empty results to trigger break
             return MockResponse(_json={"data": {"result": None}})
         return MockResponse(content=b"binary")
 
-    monkeypatch.setattr("requests.get", _mock_get)
+    monkeypatch.setattr("requests.Session.get", _mock_get)
 
     # Should not create any directories since no results
     downloader = AudiothekDownloader()
@@ -213,12 +213,12 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
 
 def test_download_collection_no_metadata_when_no_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that no metadata file is created when API returns no results."""
-    def _mock_get_no_results(url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get_no_results(self, url: str, params: dict | None = None, timeout: int | None = None):
         if url == "https://api.ardaudiothek.de/graphql":
             return MockResponse(_json={"data": {"result": None}})
         return MockResponse(content=b"binary")
 
-    monkeypatch.setattr("requests.get", _mock_get_no_results)
+    monkeypatch.setattr("requests.Session.get", _mock_get_no_results)
 
     downloader = AudiothekDownloader()
     downloader._download_collection("https://x", "test_id", str(tmp_path), is_editorial_collection=False)
@@ -350,7 +350,7 @@ def test_main_script_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             # Change to the correct directory for the module path
             m.chdir(Path(__file__).parent.parent)
             # Mock the functions to avoid actual network calls
-            m.setattr("requests.get", lambda *args, **kwargs: None)
+            m.setattr("requests.Session.get", lambda *args, **kwargs: None)
             m.setattr("os.makedirs", lambda *args, **kwargs: None)
             m.setattr("builtins.open", lambda *args, **kwargs: None)
 
@@ -580,7 +580,7 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
 
     calls: list[str] = []
 
-    def _get(url: str, params: dict | None = None, timeout: int | None = None):
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
         calls.append(url)
 
         class _Resp:
@@ -591,7 +591,7 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
 
         return _Resp()
 
-    monkeypatch.setattr("requests.get", _get)
+    monkeypatch.setattr("requests.Session.get", _get)
 
     downloader = AudiothekDownloader()
     downloader._save_nodes(
@@ -888,13 +888,13 @@ def test_get_episode_title_api_response_handling(tmp_path: Path, monkeypatch: py
     downloader = AudiothekDownloader()
 
     # Test when API response has no data
-    def _mock_requests_get_no_data(*args, **kwargs):
+    def _mock_requests_get_no_data(self, *args, **kwargs):
         class MockResponse:
             def json(self):
                 return {"data": {}}
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_no_data)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_data)
 
     result = downloader._get_episode_title("test_id")
     assert result is None
@@ -910,7 +910,7 @@ def test_get_program_set_title_no_items(tmp_path: Path, monkeypatch: pytest.Monk
                 return {"data": {"result": {}}}
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_no_items)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_items)
 
     result = downloader._get_program_set_title("test_id")
     assert result is None
@@ -926,7 +926,7 @@ def test_get_program_set_title_empty_nodes(tmp_path: Path, monkeypatch: pytest.M
                 return {"data": {"result": {"items": {"nodes": []}}}}
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_empty_nodes)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_empty_nodes)
 
     result = downloader._get_program_set_title("test_id")
     assert result is None
@@ -1014,26 +1014,26 @@ def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_get_episode_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_episode_title when requests.get raises exception."""
+    """Test _get_episode_title when requests.Session.get raises exception."""
     downloader = AudiothekDownloader()
 
-    def _mock_requests_get_exception(*args, **kwargs):
+    def _mock_requests_get_exception(self, *args, **kwargs):
         raise requests.exceptions.RequestException("Network error")
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_exception)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_exception)
 
     result = downloader._get_episode_title("test_id")
     assert result is None
 
 
 def test_get_program_set_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when requests.get raises exception."""
+    """Test _get_program_set_title when requests.Session.get raises exception."""
     downloader = AudiothekDownloader()
 
-    def _mock_requests_get_exception(*args, **kwargs):
+    def _mock_requests_get_exception(self, *args, **kwargs):
         raise requests.exceptions.RequestException("Network error")
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_exception)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_exception)
 
     result = downloader._get_program_set_title("test_id")
     assert result is None
@@ -1049,7 +1049,7 @@ def test_get_program_set_title_missing_title_in_node(tmp_path: Path, monkeypatch
                 return {"data": {"result": {"items": {"nodes": [{"programSet": {}}]}}}}
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_no_title)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_title)
 
     result = downloader._get_program_set_title("test_id")
     assert result is None
@@ -1083,7 +1083,7 @@ def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pyte
     """Test _get_episode_title with valid API response."""
     downloader = AudiothekDownloader()
 
-    def _mock_requests_get_valid(*args, **kwargs):
+    def _mock_requests_get_valid(self, *args, **kwargs):
         class MockResponse:
             def json(self):
                 return {
@@ -1097,7 +1097,7 @@ def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pyte
                 }
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_valid)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
 
     result = downloader._get_episode_title("test_id")
     assert result == "Test Program Title"
@@ -1107,7 +1107,7 @@ def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: 
     """Test _get_program_set_title with valid API response."""
     downloader = AudiothekDownloader()
 
-    def _mock_requests_get_valid(*args, **kwargs):
+    def _mock_requests_get_valid(self, *args, **kwargs):
         class MockResponse:
             def json(self):
                 return {
@@ -1127,7 +1127,7 @@ def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: 
                 }
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get_valid)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
 
     result = downloader._get_program_set_title("test_id")
     assert result == "Test Program Set Title"
@@ -1190,12 +1190,12 @@ def test_save_nodes_without_programset_title(tmp_path: Path, monkeypatch: pytest
         "programSet": {"id": "ps1"}  # No title field
     }
 
-    def _mock_requests_get(*args, **kwargs):
+    def _mock_requests_get(self, *args, **kwargs):
         class MockResponse:
             content = b"audio data"
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_requests_get)
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get)
 
     downloader._save_nodes([node], str(tmp_path))
 
@@ -1376,8 +1376,8 @@ def test_save_collection_data_downloads_cover_image(tmp_path: Path, monkeypatch:
         "image": {"url": "https://cdn.test/collection_{width}.jpg"}
     }
 
-    # Mock requests.get to simulate image download
-    def _mock_get(url: str, timeout: int | None = None):
+    # Mock requests.Session.get to simulate image download
+    def _mock_get(self, url: str, timeout: int | None = None):
         class MockResponse:
             def raise_for_status(self):
                 pass
@@ -1386,7 +1386,7 @@ def test_save_collection_data_downloads_cover_image(tmp_path: Path, monkeypatch:
                 return b"fake_image_data"
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_get)
+    monkeypatch.setattr("requests.Session.get", _mock_get)
 
     downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
@@ -1418,13 +1418,13 @@ def test_save_collection_data_no_image_url(tmp_path: Path) -> None:
 
 def test_save_collection_data_image_download_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     """Test _save_collection_data when image download fails."""
-    def _mock_get_error(url: str, timeout: int | None = None):
+    def _mock_get_error(self, url: str, timeout: int | None = None):
         class MockResponse:
             def raise_for_status(self):
                 raise requests.HTTPError("404 Not Found")
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_get_error)
+    monkeypatch.setattr("requests.Session.get", _mock_get_error)
 
     downloader = AudiothekDownloader()
     collection_data = {
@@ -1453,9 +1453,9 @@ def test_save_collection_data_skips_existing_image(tmp_path: Path, monkeypatch: 
     cover_image_file = tmp_path / "test_ec.jpg"
     cover_image_file.write_bytes(b"existing_image_data")
 
-    # Mock requests.get - this should not be called
+    # Mock requests.Session.get - this should not be called
     get_called = False
-    def _mock_get(url: str, timeout: int | None = None):
+    def _mock_get(self, url: str, timeout: int | None = None):
         nonlocal get_called
         get_called = True
         class MockResponse:
@@ -1466,13 +1466,13 @@ def test_save_collection_data_skips_existing_image(tmp_path: Path, monkeypatch: 
                 return b"new_image_data"
         return MockResponse()
 
-    monkeypatch.setattr("requests.get", _mock_get)
+    monkeypatch.setattr("requests.Session.get", _mock_get)
 
     downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
     # Check that existing file was not overwritten
     assert cover_image_file.read_bytes() == b"existing_image_data"
-    assert not get_called  # requests.get should not have been called
+    assert not get_called  # requests.Session.get should not have been called
 
 
 def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:

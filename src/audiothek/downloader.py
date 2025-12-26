@@ -23,6 +23,7 @@ class AudiothekDownloader:
         self.logger = logging.getLogger(__name__)
         self._base_dir = os.path.dirname(os.path.abspath(__file__))
         self._graphql_dir = os.path.join(self._base_dir, "graphql")
+        self._session = requests.Session()
 
     def _load_graphql_query(self, filename: str) -> str:
         query_path = os.path.join(self._graphql_dir, filename)
@@ -35,7 +36,7 @@ class AudiothekDownloader:
         return programset_id
 
     def _graphql_get(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        response = requests.get(
+        response = self._session.get(
             "https://api.ardaudiothek.de/graphql",
             params={"query": query, "variables": json.dumps(variables)},
             timeout=REQUEST_TIMEOUT,
@@ -43,7 +44,7 @@ class AudiothekDownloader:
         return response.json()
 
     def _download_to_file(self, url: str, file_path: str, *, check_status: bool = False) -> None:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        response = self._session.get(url, timeout=REQUEST_TIMEOUT)
         if check_status:
             response.raise_for_status()
         with open(file_path, "wb") as f:
@@ -515,6 +516,7 @@ class AudiothekDownloader:
             if first_audio:
                 mp3_url = first_audio.get("downloadUrl") or first_audio.get("url") or ""
             if not mp3_url:
+                self.logger.warning("No audio URL found for node %s", node_id)
                 continue
 
             program_set = node.get("programSet") or {}

@@ -220,7 +220,7 @@ def graphql_mock(graphql_schema: GraphQLSchema) -> GraphQLMock:
 
 @pytest.fixture()
 def mock_requests_get(monkeypatch: pytest.MonkeyPatch, graphql_mock: GraphQLMock) -> Callable[..., MockResponse]:
-    def _mock_get(url: str, params: dict[str, Any] | None = None, timeout: int | None = None) -> MockResponse:  # noqa: ARG001
+    def _mock_session_get(self, url: str, params: dict[str, Any] | None = None, timeout: int | None = None, **kwargs: Any) -> MockResponse:  # noqa: ARG001
         if url == "https://api.ardaudiothek.de/graphql":
             assert params is not None
             query = params["query"]
@@ -233,5 +233,6 @@ def mock_requests_get(monkeypatch: pytest.MonkeyPatch, graphql_mock: GraphQLMock
 
         raise AssertionError(f"Unexpected URL requested: {url}")
 
-    monkeypatch.setattr("requests.get", _mock_get)
-    return _mock_get
+    # Mock the Session.get method instead of requests.get
+    monkeypatch.setattr("requests.Session.get", _mock_session_get)
+    return _mock_session_get
