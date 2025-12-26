@@ -17,6 +17,8 @@ class DownloadRequest:
     id: str = ""
     update_folders: bool = False
     migrate_folders_flag: bool = False
+    remove_lower_quality: bool = False
+    dry_run: bool = False
     editorial_category_id: str = ""
     search_type: str = "all"
     folder: str = "./output"
@@ -52,6 +54,11 @@ def main() -> None:
         help="Migrate existing folders to new naming schema (ID + Title)",
     )
     group.add_argument(
+        "--remove-lower-quality",
+        action="store_true",
+        help="Remove lower quality files (MP3 128kbit) when higher quality (MP4/AAC >=96kbit) exists",
+    )
+    group.add_argument(
         "--editorial-category-id",
         type=str,
         default="",
@@ -71,6 +78,11 @@ def main() -> None:
         default="all",
         help="When using --editorial-category-id, select what to return",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be removed without actually deleting files (use with --remove-lower-quality)",
+    )
 
     args = parser.parse_args()
 
@@ -80,6 +92,8 @@ def main() -> None:
             id=args.id,
             update_folders=args.update_folders,
             migrate_folders_flag=args.migrate_folders,
+            remove_lower_quality=args.remove_lower_quality,
+            dry_run=args.dry_run,
             editorial_category_id=args.editorial_category_id,
             search_type=args.search_type,
             folder=os.path.realpath(args.folder),
@@ -106,6 +120,10 @@ def _process_request(request: DownloadRequest) -> None:
 
     if request.update_folders:
         downloader.update_all_folders(request.folder)
+        return
+
+    if request.remove_lower_quality:
+        downloader.remove_lower_quality_files(request.folder, dry_run=request.dry_run)
         return
 
     if request.editorial_category_id:

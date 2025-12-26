@@ -331,8 +331,192 @@ def test_process_request_with_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert len(download_calls) == 1
 
 
-def test_argument_parser_includes_proxy() -> None:
-    """Test that the argument parser includes proxy argument."""
+def test_main_with_remove_lower_quality(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with remove_lower_quality=True"""
+    calls = []
+
+    def _mock_remove_lower_quality_files(self, folder, dry_run=False):
+        calls.append(("remove_lower_quality_files", folder, dry_run))
+
+    monkeypatch.setattr(AudiothekDownloader, "remove_lower_quality_files", _mock_remove_lower_quality_files)
+
+    # Test with remove_lower_quality=True
+    request = DownloadRequest(folder=str(tmp_path), remove_lower_quality=True)
+    _process_request(request)
+
+    assert len(calls) == 1
+    assert calls[0] == ("remove_lower_quality_files", str(tmp_path), False)
+
+
+def test_cli_main_with_remove_lower_quality(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test CLI main function with --remove-lower-quality argument."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_remove_lower_quality_files(self, folder: str, dry_run: bool = False) -> None:
+        calls.append(("remove_lower_quality_files", folder, dry_run))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "remove_lower_quality_files", _mock_remove_lower_quality_files)
+
+    argv = ["audiothek", "--remove-lower-quality", "--folder", str(tmp_path)]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    # Check that downloader was initialized
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+
+    # Check that remove_lower_quality_files was called with dry_run=False
+    remove_calls = [call for call in calls if call[0] == "remove_lower_quality_files"]
+    assert len(remove_calls) == 1
+    assert remove_calls[0][1] == str(tmp_path)
+    assert remove_calls[0][2] is False  # dry_run parameter
+
+
+def test_main_with_editorial_category_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with editorial_category_id."""
+    calls = []
+
+    def _mock_find_program_sets(self, editorial_category_id, limit=200):
+        calls.append(("find_program_sets_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test1", "title": "Test Program Set"}]
+
+    def _mock_find_collections(self, editorial_category_id, limit=200):
+        calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test2", "title": "Test Collection"}]
+
+    def _mock_init(self, base_folder, proxy=None):
+        self.client = type('MockClient', (), {
+            'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
+            'find_editorial_collections_by_editorial_category_id': _mock_find_collections
+        })()
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+
+    # Test with editorial_category_id and search_type="all"
+    request = DownloadRequest(editorial_category_id="12345", search_type="all", folder=str(tmp_path))
+    _process_request(request)
+
+    # Should call both methods
+    assert len(calls) == 2
+    assert calls[0][0] == "find_program_sets_by_editorial_category_id"
+    assert calls[0][1] == "12345"
+    assert calls[1][0] == "find_editorial_collections_by_editorial_category_id"
+    assert calls[1][1] == "12345"
+
+
+def test_main_with_editorial_category_id_program_sets_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with editorial_category_id and program-sets only."""
+    calls = []
+
+    def _mock_find_program_sets(self, editorial_category_id, limit=200):
+        calls.append(("find_program_sets_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test1", "title": "Test Program Set"}]
+
+    def _mock_find_collections(self, editorial_category_id, limit=200):
+        calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test2", "title": "Test Collection"}]
+
+    def _mock_init(self, base_folder, proxy=None):
+        self.client = type('MockClient', (), {
+            'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
+            'find_editorial_collections_by_editorial_category_id': _mock_find_collections
+        })()
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+
+    # Test with editorial_category_id and search_type="program-sets"
+    request = DownloadRequest(editorial_category_id="12345", search_type="program-sets", folder=str(tmp_path))
+    _process_request(request)
+
+    # Should call only program sets method
+    assert len(calls) == 1
+    assert calls[0][0] == "find_program_sets_by_editorial_category_id"
+    assert calls[0][1] == "12345"
+
+
+def test_main_with_editorial_category_id_collections_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with editorial_category_id and collections only."""
+    calls = []
+
+    def _mock_find_program_sets(self, editorial_category_id, limit=200):
+        calls.append(("find_program_sets_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test1", "title": "Test Program Set"}]
+
+    def _mock_find_collections(self, editorial_category_id, limit=200):
+        calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
+        return [{"id": "test2", "title": "Test Collection"}]
+
+    def _mock_init(self, base_folder, proxy=None):
+        self.client = type('MockClient', (), {
+            'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
+            'find_editorial_collections_by_editorial_category_id': _mock_find_collections
+        })()
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+
+    # Test with editorial_category_id and search_type="collections"
+    request = DownloadRequest(editorial_category_id="12345", search_type="collections", folder=str(tmp_path))
+    _process_request(request)
+
+    # Should call only collections method
+    assert len(calls) == 1
+    assert calls[0][0] == "find_editorial_collections_by_editorial_category_id"
+    assert calls[0][1] == "12345"
+
+
+def test_cli_main_with_remove_lower_quality_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test CLI main function with --remove-lower-quality and --dry-run arguments."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_remove_lower_quality_files(self, folder: str, dry_run: bool = False) -> None:
+        calls.append(("remove_lower_quality_files", folder, dry_run))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "remove_lower_quality_files", _mock_remove_lower_quality_files)
+
+    argv = ["audiothek", "--remove-lower-quality", "--dry-run", "--folder", str(tmp_path)]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    # Check that downloader was initialized
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+
+    # Check that remove_lower_quality_files was called with dry_run=True
+    remove_calls = [call for call in calls if call[0] == "remove_lower_quality_files"]
+    assert len(remove_calls) == 1
+    assert remove_calls[0][1] == str(tmp_path)
+    assert remove_calls[0][2] is True  # dry_run parameter
+
+
+def test_main_with_remove_lower_quality_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test main function with remove_lower_quality=True and dry_run=True."""
+    calls = []
+
+    def _mock_remove_lower_quality_files(self, folder, dry_run=False):
+        calls.append(("remove_lower_quality_files", folder, dry_run))
+
+    monkeypatch.setattr(AudiothekDownloader, "remove_lower_quality_files", _mock_remove_lower_quality_files)
+
+    # Test with remove_lower_quality=True and dry_run=True
+    request = DownloadRequest(folder=str(tmp_path), remove_lower_quality=True, dry_run=True)
+    _process_request(request)
+
+    assert len(calls) == 1
+    assert calls[0] == ("remove_lower_quality_files", str(tmp_path), True)
+
+
+def test_argument_parser_includes_dry_run() -> None:
+    """Test that the argument parser includes dry-run argument."""
     import argparse
 
     # Import the parser setup by simulating the main block setup
@@ -340,13 +524,18 @@ def test_argument_parser_includes_proxy() -> None:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--url", "-u", type=str, default="", help="Insert audiothek url")
     group.add_argument("--id", "-i", type=str, default="", help="Insert audiothek resource ID directly")
+    group.add_argument("--update-folders", action="store_true", help="Update all subfolders")
+    group.add_argument("--migrate-folders", action="store_true", help="Migrate existing folders")
+    group.add_argument("--remove-lower-quality", action="store_true", help="Remove lower quality files")
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
-    parser.add_argument("--proxy", "-p", type=str, default=None, help="Proxy URL")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be removed without actually deleting files")
 
-    # Test parsing with proxy
-    args = parser.parse_args(["--url", "https://example.com", "--proxy", "http://proxy.example.com:8080"])
-    assert args.proxy == "http://proxy.example.com:8080"
+    # Test parsing with --dry-run
+    args = parser.parse_args(["--remove-lower-quality", "--dry-run", "--folder", "/tmp"])
+    assert args.dry_run is True
+    assert args.remove_lower_quality is True
+    assert args.folder == "/tmp"
 
-    # Test parsing without proxy (default should be None)
+    # Test parsing without --dry-run (default should be False)
     args = parser.parse_args(["--url", "https://example.com"])
-    assert args.proxy is None
+    assert args.dry_run is False

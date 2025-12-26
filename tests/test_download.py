@@ -822,3 +822,201 @@ def test_download_audio_file_uses_fallback_on_404(tmp_path: Path, monkeypatch: p
     log_messages = [r.message for r in caplog.records]
     assert any("Trying fallback URL:" in msg for msg in log_messages)
     assert any("Successfully downloaded from fallback URL:" in msg for msg in log_messages)
+
+
+def test_remove_lower_quality_files_no_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with empty directory."""
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("INFO"):
+        downloader.remove_lower_quality_files(str(tmp_path))
+
+    # Should log starting message but no removals
+    log_messages = [r.message for r in caplog.records]
+    assert any("Starting removal of lower quality files" in msg for msg in log_messages)
+
+
+def test_remove_lower_quality_files_no_audio_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with directory containing no audio files."""
+    # Create non-audio files
+    (tmp_path / "test.txt").write_text("test")
+    (tmp_path / "image.jpg").write_bytes(b"fake image")
+
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("INFO"):
+        downloader.remove_lower_quality_files(str(tmp_path))
+
+    # Should log starting message but no removals
+    log_messages = [r.message for r in caplog.records]
+    assert any("Starting removal of lower quality files" in msg for msg in log_messages)
+
+
+def test_get_audio_quality_invalid_file(tmp_path: Path) -> None:
+    """Test _get_audio_quality with invalid file."""
+    downloader = AudiothekDownloader()
+
+    # Create a non-audio file
+    invalid_file = tmp_path / "invalid.txt"
+    invalid_file.write_text("not audio")
+
+    quality = downloader._get_audio_quality(str(invalid_file))
+    assert quality is None
+
+
+def test_remove_lower_quality_files_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with dry_run=True."""
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("INFO"):
+        downloader.remove_lower_quality_files(str(tmp_path), dry_run=True)
+
+    # Should log dry run message
+    log_messages = [r.message for r in caplog.records]
+    assert any("DRY RUN: Showing what would be removed" in msg for msg in log_messages)
+
+
+def test_remove_lower_quality_files_dry_run_with_subdirs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with dry_run=True and subdirectories."""
+    # Create subdirectories
+    subdir1 = tmp_path / "subdir1"
+    subdir2 = tmp_path / "subdir2"
+    subdir1.mkdir()
+    subdir2.mkdir()
+
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("INFO"):
+        downloader.remove_lower_quality_files(str(tmp_path), dry_run=True)
+
+    # Should log dry run message
+    log_messages = [r.message for r in caplog.records]
+    assert any("DRY RUN: Showing what would be removed" in msg for msg in log_messages)
+
+
+def test_process_folder_quality_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _process_folder_quality with dry_run=True."""
+    downloader = AudiothekDownloader()
+
+    # Create a directory with some test files
+    test_dir = tmp_path / "test_folder"
+    test_dir.mkdir()
+
+    with caplog.at_level("INFO"):
+        downloader._process_folder_quality(str(test_dir), dry_run=True)
+
+    # Should not error, even with dry_run=True
+
+
+def test_compare_and_remove_files_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _compare_and_remove_files with dry_run=True."""
+    downloader = AudiothekDownloader()
+
+    # Mock _get_audio_quality to return bitrates
+    def mock_get_quality(file_path):
+        if file_path.endswith('.mp3'):
+            return 128
+        elif file_path.endswith('.mp4'):
+            return 96
+        return None
+
+    downloader._get_audio_quality = mock_get_quality
+
+    # Create mock files
+    mp3_file = tmp_path / "test.mp3"
+    mp4_file = tmp_path / "test.mp4"
+    mp3_file.write_bytes(b"fake mp3 content")
+    mp4_file.write_bytes(b"fake mp4 content")
+
+    files = {'.mp3': str(mp3_file), '.mp4': str(mp4_file)}
+
+    with caplog.at_level("INFO"):
+        downloader._compare_and_remove_files("test", files, str(tmp_path), dry_run=True)
+
+    # Should log dry run message for removal
+    log_messages = [r.message for r in caplog.records]
+    assert any("DRY RUN: Would remove lower quality file" in msg for msg in log_messages)
+
+
+def test_remove_lower_quality_files_directory_not_found(caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with non-existent directory."""
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("ERROR"):
+        downloader.remove_lower_quality_files("/non/existent/path")
+
+    # Should log error about directory not existing
+    log_messages = [r.message for r in caplog.records]
+    assert any("Output directory /non/existent/path does not exist" in msg for msg in log_messages)
+
+
+def test_process_folder_quality_error_handling(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _process_folder_quality error handling."""
+    downloader = AudiothekDownloader()
+
+    # Create a directory that will cause an error (permission denied simulation)
+    restricted_dir = tmp_path / "restricted"
+    restricted_dir.mkdir()
+
+    # Mock os.listdir to raise an exception
+    def mock_listdir(path):
+        raise PermissionError("Permission denied")
+
+    import audiothek.downloader
+    original_listdir = audiothek.downloader.os.listdir
+    audiothek.downloader.os.listdir = mock_listdir
+
+    try:
+        with caplog.at_level("ERROR"):
+            downloader._process_folder_quality(str(restricted_dir))
+
+        # Should log error
+        log_messages = [r.message for r in caplog.records]
+        assert any("Error processing folder" in msg for msg in log_messages)
+    finally:
+        audiothek.downloader.os.listdir = original_listdir
+
+
+def test_compare_and_remove_files_single_file(tmp_path: Path) -> None:
+    """Test _compare_and_remove_files with only one file (no comparison)."""
+    downloader = AudiothekDownloader()
+
+    # Test with single file - should not attempt removal
+    files = {'.mp3': str(tmp_path / "test.mp3")}
+    downloader._compare_and_remove_files("test", files, str(tmp_path))
+
+    # Should not raise any errors
+
+
+def test_compare_and_remove_files_no_quality_info(tmp_path: Path) -> None:
+    """Test _compare_and_remove_files when quality info cannot be determined."""
+    downloader = AudiothekDownloader()
+
+    # Mock _get_audio_quality to return None
+    def mock_get_quality(file_path):
+        return None
+
+    downloader._get_audio_quality = mock_get_quality
+
+    files = {'.mp3': str(tmp_path / "test.mp3"), '.mp4': str(tmp_path / "test.mp4")}
+    downloader._compare_and_remove_files("test", files, str(tmp_path))
+
+    # Should not raise any errors
+
+
+def test_remove_lower_quality_files_with_subdirs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Test remove_lower_quality_files with subdirectories."""
+    # Create subdirectories
+    subdir1 = tmp_path / "subdir1"
+    subdir2 = tmp_path / "subdir2"
+    subdir1.mkdir()
+    subdir2.mkdir()
+
+    downloader = AudiothekDownloader()
+
+    with caplog.at_level("INFO"):
+        downloader.remove_lower_quality_files(str(tmp_path))
+
+    # Should log starting message
+    log_messages = [r.message for r in caplog.records]
+    assert any("Starting removal of lower quality files" in msg for msg in log_messages)
