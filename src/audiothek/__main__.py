@@ -43,6 +43,13 @@ def main() -> None:
     )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
     parser.add_argument(
+        "--proxy",
+        "-p",
+        type=str,
+        default=None,
+        help="Proxy URL (e.g. \"http://proxy.example.com:8080\" or \"socks5://proxy.example.com:1080\")",
+    )
+    parser.add_argument(
         "--search-type",
         choices=["program-sets", "collections", "all"],
         default="all",
@@ -57,8 +64,9 @@ def main() -> None:
     editorial_category_id = args.editorial_category_id
     search_type = args.search_type
     folder = os.path.realpath(args.folder)
+    proxy = args.proxy
 
-    _process_request(url, folder, id, update_folders, migrate_folders, editorial_category_id, search_type)
+    _process_request(url, folder, id, update_folders, migrate_folders, editorial_category_id, search_type, proxy)
 
 
 def _process_request(
@@ -69,6 +77,7 @@ def _process_request(
     migrate_folders: bool = False,
     editorial_category_id: str = "",
     search_type: str = "all",
+    proxy: str | None = None,
 ) -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
@@ -80,12 +89,13 @@ def _process_request(
         migrate_folders: Whether to migrate folders to new naming schema
         editorial_category_id: The editorial category ID to search for program sets and/or editorial collections
         search_type: Whether to search for program sets, editorial collections, or both
+        proxy: Proxy URL for HTTP/HTTPS requests
 
     Returns:
         None
 
     """
-    downloader = AudiothekDownloader(folder)
+    downloader = AudiothekDownloader(folder, proxy)
 
     if migrate_folders:
         downloader.migrate_folders(folder)

@@ -12,11 +12,12 @@ from .utils import REQUEST_TIMEOUT, sanitize_folder_name
 class AudiothekDownloader:
     """ARD Audiothek downloader class."""
 
-    def __init__(self, base_folder: str = "./output") -> None:
+    def __init__(self, base_folder: str = "./output", proxy: str | None = None) -> None:
         """Initialize the downloader.
 
         Args:
             base_folder: Default output directory for downloaded files
+            proxy: Proxy URL (e.g. "http://proxy.example.com:8080" or "socks5://proxy.example.com:1080")
 
         """
         self.base_folder = base_folder
@@ -24,6 +25,11 @@ class AudiothekDownloader:
         self._base_dir = os.path.dirname(os.path.abspath(__file__))
         self._graphql_dir = os.path.join(self._base_dir, "graphql")
         self._session = requests.Session()
+
+        # Configure proxy if provided
+        if proxy:
+            proxies = {"http": proxy, "https": proxy}
+            self._session.proxies = proxies
 
     def _load_graphql_query(self, filename: str) -> str:
         query_path = os.path.join(self._graphql_dir, filename)

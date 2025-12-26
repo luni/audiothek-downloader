@@ -208,3 +208,136 @@ def test_cli_main_parses_args_and_calls_downloader(tmp_path: Path, monkeypatch: 
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/u"
     assert os.path.realpath(calls[0][2]) == os.path.realpath(str(tmp_path))
+
+
+def test_cli_main_with_http_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test CLI main function with HTTP proxy argument."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_download_from_url(self, url: str, folder: str) -> None:
+        calls.append(("download_from_url", url, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+
+    proxy_url = "http://proxy.example.com:8080"
+    argv = ["audiothek", "--url", "https://example.com/u", "--folder", str(tmp_path), "--proxy", proxy_url]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    # Check that downloader was initialized with proxy
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2] == proxy_url  # proxy parameter
+
+    # Check that download was called
+    download_calls = [call for call in calls if call[0] == "download_from_url"]
+    assert len(download_calls) == 1
+
+
+def test_cli_main_with_socks5_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test CLI main function with SOCKS5 proxy argument."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_download_from_id(self, resource_id: str, folder: str) -> None:
+        calls.append(("download_from_id", resource_id, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_id", _mock_download_from_id)
+
+    proxy_url = "socks5://socks-proxy.example.com:1080"
+    argv = ["audiothek", "--id", "12345", "--folder", str(tmp_path), "--proxy", proxy_url]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    # Check that downloader was initialized with proxy
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2] == proxy_url  # proxy parameter
+
+    # Check that download was called
+    download_calls = [call for call in calls if call[0] == "download_from_id"]
+    assert len(download_calls) == 1
+
+
+def test_cli_main_without_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test CLI main function without proxy argument."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_download_from_url(self, url: str, folder: str) -> None:
+        calls.append(("download_from_url", url, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+
+    argv = ["audiothek", "--url", "https://example.com/u", "--folder", str(tmp_path)]
+    monkeypatch.setattr("sys.argv", argv)
+
+    main()
+
+    # Check that downloader was initialized without proxy
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2] is None  # proxy parameter should be None
+
+    # Check that download was called
+    download_calls = [call for call in calls if call[0] == "download_from_url"]
+    assert len(download_calls) == 1
+
+
+def test_process_request_with_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _process_request function with proxy parameter."""
+    calls: list[tuple] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None):
+        calls.append(("__init__", base_folder, proxy))
+
+    def _mock_download_from_url(self, url: str, folder: str) -> None:
+        calls.append(("download_from_url", url, folder))
+
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+
+    proxy_url = "https://secure-proxy.example.com:3128"
+    _process_request("https://example.com/test", str(tmp_path), proxy=proxy_url)
+
+    # Check that downloader was initialized with proxy
+    init_calls = [call for call in calls if call[0] == "__init__"]
+    assert len(init_calls) == 1
+    assert init_calls[0][2] == proxy_url
+
+    # Check that download was called
+    download_calls = [call for call in calls if call[0] == "download_from_url"]
+    assert len(download_calls) == 1
+
+
+def test_argument_parser_includes_proxy() -> None:
+    """Test that the argument parser includes proxy argument."""
+    import argparse
+
+    # Import the parser setup by simulating the main block setup
+    parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--url", "-u", type=str, default="", help="Insert audiothek url")
+    group.add_argument("--id", "-i", type=str, default="", help="Insert audiothek resource ID directly")
+    parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
+    parser.add_argument("--proxy", "-p", type=str, default=None, help="Proxy URL")
+
+    # Test parsing with proxy
+    args = parser.parse_args(["--url", "https://example.com", "--proxy", "http://proxy.example.com:8080"])
+    assert args.proxy == "http://proxy.example.com:8080"
+
+    # Test parsing without proxy (default should be None)
+    args = parser.parse_args(["--url", "https://example.com"])
+    assert args.proxy is None

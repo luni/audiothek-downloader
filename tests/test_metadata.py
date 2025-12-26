@@ -308,7 +308,7 @@ def test_save_collection_data_downloads_cover_image(tmp_path: Path, monkeypatch:
     }
 
     # Mock requests.Session.get to simulate image download
-    def _mock_get(self, url: str, timeout: int | None = None):
+    def _mock_get(self, url: str, timeout: int | None = None, **kwargs: Any):
         class MockResponse:
             def raise_for_status(self):
                 pass
@@ -348,7 +348,7 @@ def test_save_collection_data_no_image_url(tmp_path: Path) -> None:
 
 def test_save_collection_data_image_download_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     """Test _save_collection_data when image download fails."""
-    def _mock_get_error(self, url: str, timeout: int | None = None):
+    def _mock_get_error(self, url: str, timeout: int | None = None, **kwargs: Any):
         class MockResponse:
             def raise_for_status(self):
                 raise requests.HTTPError("404 Not Found")
@@ -388,7 +388,7 @@ def test_save_collection_data_skips_existing_image(tmp_path: Path, monkeypatch: 
 
     # Mock requests.Session.get - this should not be called
     get_called = False
-    def _mock_get(self, url: str, timeout: int | None = None):
+    def _mock_get(self, url: str, timeout: int | None = None, **kwargs: Any):
         nonlocal get_called
         get_called = True
         class MockResponse:

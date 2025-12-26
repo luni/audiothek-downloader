@@ -73,7 +73,7 @@ def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: objec
 
 
 def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
-    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         class _Resp:
             def json(self):
                 return {"data": {"result": None}}
@@ -89,7 +89,7 @@ def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, capl
 
 
 def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, graphql_mock: GraphQLMock) -> None:
-    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         if url == "https://api.ardaudiothek.de/graphql":
             # Return empty results to trigger break
             return MockResponse(_json={"data": {"result": None}})
@@ -105,7 +105,7 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
 
 def test_download_collection_no_metadata_when_no_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that no metadata file is created when API returns no results."""
-    def _mock_get_no_results(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _mock_get_no_results(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         if url == "https://api.ardaudiothek.de/graphql":
             return MockResponse(_json={"data": {"result": None}})
         return MockResponse(content=b"binary")
