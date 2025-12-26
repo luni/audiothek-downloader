@@ -199,7 +199,7 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
 
 
 def test_save_nodes_redownloads_incomplete_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test that incomplete files are backed up and re-downloaded."""
+    """Test that incomplete files are backed up and re-downloaded when new version is larger."""
     program_dir = tmp_path / "ps1 Prog"
     program_dir.mkdir(parents=True)
 
@@ -226,7 +226,7 @@ def test_save_nodes_redownloads_incomplete_files(tmp_path: Path, monkeypatch: py
         calls.append(f"HEAD:{url}")
 
         class _Resp:
-            headers = {"content-length": "10"}  # Different size (incomplete file)
+            headers = {"content-length": "10"}  # Larger than existing file (3 bytes)
 
             def raise_for_status(self):
                 pass
@@ -257,6 +257,67 @@ def test_save_nodes_redownloads_incomplete_files(tmp_path: Path, monkeypatch: py
     assert os.path.exists(program_dir / f"{filename}.mp3.bak")
     # New file should be downloaded
     assert (program_dir / f"{filename}.mp3").read_bytes() == b"new"
+
+
+def test_save_nodes_skips_smaller_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that files are not re-downloaded when new version is smaller."""
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir(parents=True)
+
+    # save_nodes builds filename as: <sanitized_title>_<node_id>
+    filename = "Existing_e1_e1"
+    (program_dir / f"{filename}.mp3").write_bytes(b"larger")  # 6 bytes
+    (program_dir / f"{filename}.jpg").write_bytes(b"old")
+    (program_dir / f"{filename}_x1.jpg").write_bytes(b"old")
+
+    calls: list[str] = []
+
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+        calls.append(f"GET:{url}")
+
+        class _Resp:
+            content = b"new"
+
+            def json(self):
+                return {}
+
+        return _Resp()
+
+    def _head(self, url: str, timeout: int | None = None):
+        calls.append(f"HEAD:{url}")
+
+        class _Resp:
+            headers = {"content-length": "3"}  # Smaller than existing file (6 bytes)
+
+            def raise_for_status(self):
+                pass
+
+        return _Resp()
+
+    monkeypatch.setattr("requests.Session.get", _get)
+    monkeypatch.setattr("requests.Session.head", _head)
+
+    downloader = AudiothekDownloader()
+    downloader._save_nodes(
+        [
+            {
+                "id": "e1",
+                "title": "Existing e1",
+                "image": {"url": "https://cdn.test/image_{width}.jpg", "url1X1": "https://cdn.test/image1x1_{width}.jpg"},
+                "audios": [{"downloadUrl": "https://cdn.test/audio.mp3"}],
+                "programSet": {"id": "ps1", "title": "Prog"},
+            }
+        ],
+        str(tmp_path),
+    )
+
+    # Should make HEAD request to check content length, but no GET request
+    assert calls == ["HEAD:https://cdn.test/audio.mp3"]
+    assert os.path.exists(program_dir / f"{filename}.json")
+    # Original file should not be backed up
+    assert not os.path.exists(program_dir / f"{filename}.mp3.bak")
+    # Original file should remain unchanged
+    assert (program_dir / f"{filename}.mp3").read_bytes() == b"larger"
 
 
 def test_save_nodes_no_download_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -468,17 +468,22 @@ class AudiothekDownloader:
                 if current_size == expected_length:
                     self.logger.info("File already exists and is complete: %s", mp3_file_path)
                     should_download = False
-                else:
+                elif expected_length > current_size:
                     self.logger.info(
-                        "File exists but is incomplete (%s/%s bytes), will backup and re-download: %s", current_size, expected_length, mp3_file_path
+                        "New version is larger than existing file (%s/%s bytes), will backup and re-download: %s", current_size, expected_length, mp3_file_path
                     )
                     # Rename old file to .bak
                     backup_path = mp3_file_path + ".bak"
                     try:
                         os.rename(mp3_file_path, backup_path)
-                        self.logger.info("Backed up incomplete file to: %s", backup_path)
+                        self.logger.info("Backed up smaller file to: %s", backup_path)
                     except Exception as e:
                         self.logger.error("Failed to backup file: %s", e)
+                else:
+                    self.logger.info(
+                        "New version is smaller than existing file (%s/%s bytes), will keep existing file: %s", current_size, expected_length, mp3_file_path
+                    )
+                    should_download = False
             else:
                 self.logger.info("Could not determine content length, will backup existing file: %s", mp3_file_path)
                 # Rename old file to .bak
