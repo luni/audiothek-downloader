@@ -86,6 +86,12 @@ class AudiothekDownloader:
             error_msg = f"Failed to lock {file_path}: {exc}"
             self.logger.error(error_msg)
             raise FileOperationError(file_path, operation, error_msg) from exc
+        finally:
+            if os.path.exists(lock_path):
+                try:
+                    os.remove(lock_path)
+                except OSError:
+                    self.logger.debug("Failed to remove lock file %s", lock_path)
 
     def download_from_url(self, url: str, folder: str | None = None) -> DownloadResult:
         """Download content from an ARD Audiothek URL.
