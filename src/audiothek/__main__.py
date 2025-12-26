@@ -1,10 +1,26 @@
 import argparse
 import logging
 import os
+from dataclasses import dataclass
 
 from audiothek import AudiothekDownloader
+from audiothek.utils import migrate_folders
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]%(message)s")
+
+
+@dataclass
+class DownloadRequest:
+    """Configuration for a download request."""
+
+    url: str = ""
+    id: str = ""
+    update_folders: bool = False
+    migrate_folders_flag: bool = False
+    editorial_category_id: str = ""
+    search_type: str = "all"
+    folder: str = "./output"
+    proxy: str | None = None
 
 
 def main() -> None:
@@ -57,70 +73,57 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    url = args.url
-    id = args.id
-    update_folders = args.update_folders
-    migrate_folders = args.migrate_folders
-    editorial_category_id = args.editorial_category_id
-    search_type = args.search_type
-    folder = os.path.realpath(args.folder)
-    proxy = args.proxy
 
-    _process_request(url, folder, id, update_folders, migrate_folders, editorial_category_id, search_type, proxy)
+    _process_request(
+        DownloadRequest(
+            url=args.url,
+            id=args.id,
+            update_folders=args.update_folders,
+            migrate_folders_flag=args.migrate_folders,
+            editorial_category_id=args.editorial_category_id,
+            search_type=args.search_type,
+            folder=os.path.realpath(args.folder),
+            proxy=args.proxy,
+        )
+    )
 
 
-def _process_request(
-    url: str,
-    folder: str,
-    id: str = "",
-    update_folders: bool = False,
-    migrate_folders: bool = False,
-    editorial_category_id: str = "",
-    search_type: str = "all",
-    proxy: str | None = None,
-) -> None:
+def _process_request(request: DownloadRequest) -> None:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
-        url: The URL of the ARD Audiothek show or collection
-        folder: The output directory to save downloaded files
-        id: The direct ID of the resource (alternative to URL)
-        update_folders: Whether to update all existing subfolders
-        migrate_folders: Whether to migrate folders to new naming schema
-        editorial_category_id: The editorial category ID to search for program sets and/or editorial collections
-        search_type: Whether to search for program sets, editorial collections, or both
-        proxy: Proxy URL for HTTP/HTTPS requests
+        request: The download request configuration
 
     Returns:
         None
 
     """
-    downloader = AudiothekDownloader(folder, proxy)
+    downloader = AudiothekDownloader(request.folder, request.proxy)
 
-    if migrate_folders:
-        downloader.migrate_folders(folder)
+    if request.migrate_folders_flag:
+        migrate_folders(request.folder, downloader, downloader.logger)
         return
 
-    if update_folders:
-        downloader.update_all_folders(folder)
+    if request.update_folders:
+        downloader.update_all_folders(request.folder)
         return
 
-    if editorial_category_id:
-        if search_type in {"program-sets", "all"}:
-            program_sets = downloader.find_program_sets_by_editorial_category_id(editorial_category_id)
+    if request.editorial_category_id:
+        if request.search_type in {"program-sets", "all"}:
+            program_sets = downloader.find_program_sets_by_editorial_category_id(request.editorial_category_id)
             for program_set in program_sets:
                 print(program_set)
 
-        if search_type in {"collections", "all"}:
-            collections = downloader.find_editorial_collections_by_editorial_category_id(editorial_category_id)
+        if request.search_type in {"collections", "all"}:
+            collections = downloader.find_editorial_collections_by_editorial_category_id(request.editorial_category_id)
             for collection in collections:
                 print(collection)
         return
 
-    if id:
-        downloader.download_from_id(id, folder)
+    if request.id:
+        downloader.download_from_id(request.id, request.folder)
     else:
-        downloader.download_from_url(url, folder)
+        downloader.download_from_url(request.url, request.folder)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Additional tests to improve coverage to 85%."""
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ import pytest
 import requests
 
 from audiothek import AudiothekClient, AudiothekDownloader
+from audiothek.utils import migrate_folders
 from tests.conftest import MockResponse
 
 
@@ -125,7 +127,7 @@ def test_migrate_folders_nonexistent_directory(tmp_path: Path, monkeypatch: pyte
 
     with caplog.at_level("ERROR"):
         downloader = AudiothekDownloader()
-        downloader.migrate_folders(nonexistent_dir)
+        migrate_folders(nonexistent_dir, downloader, downloader.logger)
 
     assert any("Output directory" in r.message and "does not exist" in r.message for r in caplog.records)
 

@@ -33,7 +33,7 @@ def test_download_single_episode_writes_files(tmp_path: Path, mock_requests_get:
 
 def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_get: object, graphql_mock: GraphQLMock) -> None:
     downloader = AudiothekDownloader()
-    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+    downloader._download_collection("ps1", str(tmp_path), is_editorial_collection=False)
 
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
@@ -99,7 +99,7 @@ def test_download_collection_no_results_breaks(tmp_path: Path, monkeypatch: pyte
 
     # Should not create any directories since no results
     downloader = AudiothekDownloader()
-    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+    downloader._download_collection("ps1", str(tmp_path), is_editorial_collection=False)
     assert not (tmp_path / "ps1 Prog").exists()
 
 
@@ -113,7 +113,7 @@ def test_download_collection_no_metadata_when_no_results(tmp_path: Path, monkeyp
     monkeypatch.setattr("requests.Session.get", _mock_get_no_results)
 
     downloader = AudiothekDownloader()
-    downloader._download_collection("https://x", "test_id", str(tmp_path), is_editorial_collection=False)
+    downloader._download_collection("test_id", str(tmp_path), is_editorial_collection=False)
 
     # No series folder should be created, so no metadata file should exist
     assert not (tmp_path / "test_id.json").exists()
@@ -277,7 +277,7 @@ def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.M
     def _mock_download_single_episode(self, episode_id, folder):
         calls.append(("download_single_episode", episode_id, folder))
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
 
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("program", rid))
@@ -301,7 +301,7 @@ def test_download_from_id_with_custom_folder(tmp_path: Path, monkeypatch: pytest
     def _mock_download_single_episode(self, episode_id, folder):
         calls.append(("download_single_episode", episode_id, folder))
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
 
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: ("episode", rid))
@@ -322,8 +322,8 @@ def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, 
 
     calls = []
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
-        calls.append(("download_collection", url, resource_id, folder, is_editorial))
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder, is_editorial))
 
     def _mock_determine_resource_type_from_id(self, resource_id):
         return "collection", resource_id
@@ -336,7 +336,7 @@ def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, 
     # Should have called download_collection with is_editorial=True for collection
     assert len(calls) == 1
     assert calls[0][0] == "download_collection"
-    assert calls[0][4] is True  # is_editorial flag
+    assert calls[0][3] is True  # is_editorial flag
 
 
 def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -345,8 +345,8 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
 
     calls = []
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
-        calls.append(("download_collection", url, resource_id, folder, is_editorial))
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
+        calls.append(("download_collection", resource_id, folder, is_editorial))
 
     def _mock_parse_url(self, url):
         return "program", "test_id"
@@ -359,4 +359,4 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
     # Should have called download_collection with is_editorial=False for program
     assert len(calls) == 1
     assert calls[0][0] == "download_collection"
-    assert calls[0][4] is False  # is_editorial flag for program type
+    assert calls[0][3] is False  # is_editorial flag for program type

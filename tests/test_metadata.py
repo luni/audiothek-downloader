@@ -170,7 +170,7 @@ def test_get_program_title_unknown_type(tmp_path: Path, monkeypatch: pytest.Monk
 def test_download_collection_saves_program_set_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: object) -> None:
     """Test that _download_collection saves program set metadata."""
     downloader = AudiothekDownloader()
-    downloader._download_collection("https://x", "ps1", str(tmp_path), is_editorial_collection=False)
+    downloader._download_collection("ps1", str(tmp_path), is_editorial_collection=False)
 
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
@@ -189,7 +189,7 @@ def test_download_collection_saves_program_set_metadata(tmp_path: Path, mock_req
 def test_download_collection_saves_editorial_collection_metadata(tmp_path: Path, mock_requests_get: object, graphql_mock: object) -> None:
     """Test that _download_collection saves editorial collection metadata."""
     downloader = AudiothekDownloader()
-    downloader._download_collection("https://x", "ec1", str(tmp_path), is_editorial_collection=True)
+    downloader._download_collection("ec1", str(tmp_path), is_editorial_collection=True)
 
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()

@@ -9,23 +9,26 @@ from pathlib import Path
 import pytest
 
 from audiothek import AudiothekDownloader
-from audiothek.__main__ import _process_request, main
+from audiothek.__main__ import _process_request, main, DownloadRequest
 
 
 def test_main_invalid_url_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    request = DownloadRequest(url="https://invalid.example", folder=str(tmp_path))
     with caplog.at_level("ERROR"):
-        _process_request("https://invalid.example", str(tmp_path))
+        _process_request(request)
     assert any("Could not determine resource ID" in r.message for r in caplog.records)
 
 
 def test_main_invalid_id_logs_and_returns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    request = DownloadRequest(folder=str(tmp_path), id="invalid_id")
     with caplog.at_level("ERROR"):
-        _process_request("", str(tmp_path), id="invalid_id")
+        _process_request(request)
     assert any("Could not determine resource type from ID" in r.message for r in caplog.records)
 
 
 def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None:
-    _process_request("", str(tmp_path), id="urn:ard:episode:test")
+    request = DownloadRequest(folder=str(tmp_path), id="urn:ard:episode:test")
+    _process_request(request)
 
     # written under programSet id and title from mock: "ps1 Prog"
     program_dir = tmp_path / "ps1 Prog"
@@ -37,7 +40,8 @@ def test_main_with_id_episode(tmp_path: Path, mock_requests_get: object) -> None
 
 
 def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql_mock: object) -> None:
-    _process_request("", str(tmp_path), id="ps1")
+    request = DownloadRequest(folder=str(tmp_path), id="ps1")
+    _process_request(request)
 
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
@@ -48,7 +52,8 @@ def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql
 
 def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
     # Test the URL path in main function
-    _process_request("https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", str(tmp_path))
+    request = DownloadRequest(url="https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", folder=str(tmp_path))
+    _process_request(request)
 
     # written under programSet id and title from mock: "ps1 Prog"
     program_dir = tmp_path / "ps1 Prog"
@@ -78,14 +83,16 @@ def test_main_argument_parsing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with URL for episode
-    _process_request("https://example.com/episode/test", str(tmp_path))
+    request = DownloadRequest(url="https://example.com/episode/test", folder=str(tmp_path))
+    _process_request(request)
     assert len(calls) == 1
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/episode/test"
 
     # Clear calls and test with URL for program
     calls.clear()
-    _process_request("https://example.com/program/test", str(tmp_path))
+    request = DownloadRequest(url="https://example.com/program/test", folder=str(tmp_path))
+    _process_request(request)
     assert len(calls) == 1
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/program/test"
@@ -185,7 +192,8 @@ def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(AudiothekDownloader, "update_all_folders", _mock_update_all_folders)
 
     # Test with update_folders=True
-    _process_request("", str(tmp_path), update_folders=True)
+    request = DownloadRequest(folder=str(tmp_path), update_folders=True)
+    _process_request(request)
 
     assert len(calls) == 1
     assert calls[0] == ("update_all_folders", str(tmp_path))
@@ -310,7 +318,8 @@ def test_process_request_with_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
 
     proxy_url = "https://secure-proxy.example.com:3128"
-    _process_request("https://example.com/test", str(tmp_path), proxy=proxy_url)
+    request = DownloadRequest(url="https://example.com/test", folder=str(tmp_path), proxy=proxy_url)
+    _process_request(request)
 
     # Check that downloader was initialized with proxy
     init_calls = [call for call in calls if call[0] == "__init__"]

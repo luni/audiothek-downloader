@@ -1,14 +1,15 @@
 """Tests for folder management functionality."""
 
 import json
+import logging
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from audiothek import AudiothekDownloader
+from audiothek.utils import migrate_folders
 
 
 def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -25,7 +26,7 @@ def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.
             return "program", folder_id
         return None
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
@@ -63,7 +64,7 @@ def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pyte
             return "program", folder_id
         return None
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
@@ -101,7 +102,7 @@ def test_update_all_folders_skips_non_numeric_folders(tmp_path: Path, monkeypatc
             return "program", folder_id
         return None
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", _mock_determine_resource_type_from_id)
@@ -126,7 +127,7 @@ def test_update_all_folders_exception_handling(tmp_path: Path, monkeypatch: pyte
     def _mock_determine_resource_type_from_id(self, folder_id):
         return "program", folder_id
 
-    def _mock_download_collection(self, url, resource_id, folder, is_editorial):
+    def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
         raise Exception("Download failed")
 
@@ -160,7 +161,7 @@ def test_migrate_folders_numeric_to_named(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(AudiothekDownloader, "_get_program_title", _mock_get_program_title)
 
     downloader = AudiothekDownloader()
-    downloader.migrate_folders(str(tmp_path))
+    migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Should have created named folder
     named_folder = tmp_path / "123456 Test Program"
@@ -182,7 +183,7 @@ def test_migrate_folders_already_named(tmp_path: Path, monkeypatch: pytest.Monke
     (tmp_path / "ps1 Test Program" / "metadata.json").write_text(json.dumps(metadata))
 
     downloader = AudiothekDownloader()
-    downloader.migrate_folders(str(tmp_path))
+    migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Folder should still exist
     assert (tmp_path / "ps1 Test Program").exists()
@@ -195,7 +196,7 @@ def test_migrate_folders_no_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyP
     (tmp_path / "123456" / "test.mp3").write_bytes(b"audio content")
 
     downloader = AudiothekDownloader()
-    downloader.migrate_folders(str(tmp_path))
+    migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Folder should still exist (no migration)
     assert (tmp_path / "123456").exists()
@@ -224,7 +225,7 @@ def test_migrate_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.
 
     with caplog.at_level("ERROR"):
         downloader = AudiothekDownloader()
-        downloader.migrate_folders(str(tmp_path))
+        migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Should have logged error
     assert any("Failed to rename folder" in r.message and "123456" in r.message for r in caplog.records)
@@ -244,7 +245,7 @@ def test_migrate_folders_resource_type_none_handling(tmp_path: Path, monkeypatch
     monkeypatch.setattr(AudiothekDownloader, "_determine_resource_type_from_id", lambda self, rid: None)
 
     downloader = AudiothekDownloader()
-    downloader.migrate_folders(str(tmp_path))
+    migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Folder should still exist (no migration)
     assert (tmp_path / "123456").exists()
@@ -264,7 +265,7 @@ def test_migrate_folders_logs_warning_when_no_title(tmp_path: Path, monkeypatch:
 
     with caplog.at_level("WARNING"):
         downloader = AudiothekDownloader()
-        downloader.migrate_folders(str(tmp_path))
+        migrate_folders(str(tmp_path), downloader, downloader.logger)
 
     # Should have logged warning
     assert any("Could not get title for folder" in r.message and "123456" in r.message for r in caplog.records)

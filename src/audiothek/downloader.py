@@ -2,10 +2,23 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from .client import AudiothekClient
 from .utils import load_graphql_query, sanitize_folder_name
+
+
+@dataclass
+class ImageMetadata:
+    """Metadata for saving images and files."""
+
+    node_id: str
+    title: str
+    filename: str
+    program_path: str
+    program_set: dict[str, Any]
+    image_urls: dict[str, str]
 
 
 class AudiothekDownloader:
@@ -23,7 +36,8 @@ class AudiothekDownloader:
         self.logger = logging.getLogger(__name__)
         self.client = AudiothekClient(proxy=proxy)
 
-    def _program_folder_name(self, programset_id: str, programset_title: str) -> str:
+    @staticmethod
+    def _program_folder_name(programset_id: str, programset_title: str) -> str:
         if programset_title:
             return f"{programset_id} {sanitize_folder_name(programset_title)}"
         return programset_id
@@ -62,7 +76,7 @@ class AudiothekDownloader:
         if resource_type == "episode":
             self._download_single_episode(resource_id, target_folder)
         else:
-            self._download_collection(url, resource_id, target_folder, resource_type == "collection")
+            self._download_collection(resource_id, target_folder, resource_type == "collection")
 
     def download_from_id(self, resource_id: str, folder: str | None = None) -> None:
         """Download content from a resource ID.
@@ -82,7 +96,7 @@ class AudiothekDownloader:
         if resource_type == "episode":
             self._download_single_episode(parsed_id, target_folder)
         else:
-            self._download_collection("", parsed_id, target_folder, resource_type == "collection")
+            self._download_collection(parsed_id, target_folder, resource_type == "collection")
 
     def update_all_folders(self, folder: str | None = None) -> None:
         """Update all subfolders in the output directory by crawling through existing IDs.
@@ -116,57 +130,6 @@ class AudiothekDownloader:
                             self.download_from_id(numeric_id, target_folder)
         except Exception as e:
             self.logger.error("Error while updating folders: %s", e)
-            self.logger.exception(e)
-
-    def migrate_folders(self, folder: str | None = None) -> None:
-        """Migrate existing folders to new naming schema (ID + Title).
-
-        Args:
-            folder: The output directory containing folders to migrate (overrides base_folder if provided)
-
-        """
-        target_folder = folder or self.base_folder
-        if not os.path.exists(target_folder):
-            self.logger.error("Output directory %s does not exist.", target_folder)
-            return
-
-        self.logger.info("Starting folder migration in %s", target_folder)
-
-        # Find all subdirectories with numeric IDs
-        try:
-            for item in os.listdir(target_folder):
-                item_path = os.path.join(target_folder, item)
-                if os.path.isdir(item_path):
-                    # Check if the folder name is a pure numeric ID (old format)
-                    if item.isdigit():
-                        self.logger.info("Found old format folder: %s", item)
-
-                        # Try to get the program title by making a request
-                        resource_result = self._determine_resource_type_from_id(item)
-                        if not resource_result:
-                            self.logger.warning("Could not determine resource type for folder: %s", item)
-                            continue
-
-                        resource_type, parsed_id = resource_result
-
-                        # Get program information to extract the title
-                        title = self._get_program_title(parsed_id, resource_type)
-                        if title:
-                            # Create new folder name with ID and title
-                            new_folder_name = f"{item} {sanitize_folder_name(title)}"
-                            new_folder_path = os.path.join(target_folder, new_folder_name)
-
-                            # Rename the folder
-                            try:
-                                os.rename(item_path, new_folder_path)
-                                self.logger.info("Renamed: %s -> %s", item, new_folder_name)
-                            except OSError as e:
-                                self.logger.error("Failed to rename folder %s: %s", item, e)
-                        else:
-                            self.logger.warning("Could not get title for folder: %s", item)
-
-        except Exception as e:
-            self.logger.error("Error while migrating folders: %s", e)
             self.logger.exception(e)
 
     def _get_program_title(self, resource_id: str, resource_type: str) -> str | None:
@@ -212,23 +175,58 @@ class AudiothekDownloader:
 
         self._save_nodes([node], folder)
 
-    def _download_collection(self, url: str, resource_id: str, folder: str, is_editorial_collection: bool) -> None:
-        """Download episodes from ARD Audiothek.
+    @staticmethod
+    def _extract_collection_data(results: dict[str, Any]) -> dict[str, Any]:
+        """Extract collection data from GraphQL results."""
+        return {
+            "id": results.get("id"),
+            "coreId": results.get("coreId"),
+            "title": results.get("title"),
+            "synopsis": results.get("synopsis"),
+            "summary": results.get("summary"),
+            "editorialDescription": results.get("editorialDescription"),
+            "image": results.get("image"),
+            "sharingUrl": results.get("sharingUrl"),
+            "path": results.get("path"),
+            "numberOfElements": results.get("numberOfElements"),
+            "broadcastDuration": results.get("broadcastDuration"),
+        }
+
+    @staticmethod
+    def _extract_program_set_data(results: dict[str, Any]) -> dict[str, Any]:
+        """Extract program set data from GraphQL results."""
+        return {
+            "id": results.get("id"),
+            "coreId": results.get("coreId"),
+            "title": results.get("title"),
+            "synopsis": results.get("synopsis"),
+            "numberOfElements": results.get("numberOfElements"),
+            "image": results.get("image"),
+            "editorialCategoryId": results.get("editorialCategoryId"),
+            "imageCollectionId": results.get("imageCollectionId"),
+            "publicationServiceId": results.get("publicationServiceId"),
+            "coreDocument": results.get("coreDocument"),
+            "rowId": results.get("rowId"),
+            "nodeId": results.get("nodeId"),
+        }
+
+    def _fetch_collection_nodes(self, query: str, resource_id: str) -> tuple[list[dict], dict[str, Any]]:
+        """Fetch all nodes for a collection using GraphQL pagination.
 
         Args:
-            url: The URL of the ARD Audiothek show or collection
-            resource_id: The program set ID extracted from the URL
-            folder: The output directory to save downloaded files
-            is_editorial_collection: Whether the URL points to an editorial collection
+            query: The GraphQL query string
+            resource_id: The resource ID to fetch
+
+        Returns:
+            Tuple of (nodes list, collection_data dict)
+
 
         """
-        query_file = "editorialCollection.graphql" if is_editorial_collection else "ProgramSetEpisodesQuery.graphql"
-        query = load_graphql_query(query_file)
-
         nodes: list[dict] = []
         collection_data: dict | None = None
         offset = 0
         count = 24
+
         while True:
             variables = {"id": resource_id, "offset": offset, "count": count}
             response_json = self._graphql_get(query, variables)
@@ -237,38 +235,9 @@ class AudiothekDownloader:
             if not results:
                 break
 
-            # Store collection data for editorial collections and program sets (only on first iteration)
+            # Store collection data on first iteration
             if collection_data is None:
-                if is_editorial_collection:
-                    collection_data = {
-                        "id": results.get("id"),
-                        "coreId": results.get("coreId"),
-                        "title": results.get("title"),
-                        "synopsis": results.get("synopsis"),
-                        "summary": results.get("summary"),
-                        "editorialDescription": results.get("editorialDescription"),
-                        "image": results.get("image"),
-                        "sharingUrl": results.get("sharingUrl"),
-                        "path": results.get("path"),
-                        "numberOfElements": results.get("numberOfElements"),
-                        "broadcastDuration": results.get("broadcastDuration"),
-                    }
-                else:
-                    # Program set metadata
-                    collection_data = {
-                        "id": results.get("id"),
-                        "coreId": results.get("coreId"),
-                        "title": results.get("title"),
-                        "synopsis": results.get("synopsis"),
-                        "numberOfElements": results.get("numberOfElements"),
-                        "image": results.get("image"),
-                        "editorialCategoryId": results.get("editorialCategoryId"),
-                        "imageCollectionId": results.get("imageCollectionId"),
-                        "publicationServiceId": results.get("publicationServiceId"),
-                        "coreDocument": results.get("coreDocument"),
-                        "rowId": results.get("rowId"),
-                        "nodeId": results.get("nodeId"),
-                    }
+                collection_data = results
 
             items = results.get("items", {}) or {}
             page_nodes = items.get("nodes", []) or []
@@ -280,21 +249,40 @@ class AudiothekDownloader:
                 break
             offset += count
 
+        return nodes, collection_data or {}
+
+    def _download_collection(self, resource_id: str, folder: str, is_editorial_collection: bool) -> None:
+        """Download episodes from ARD Audiothek.
+
+        Args:
+            resource_id: The program set ID extracted from the URL
+            folder: The output directory to save downloaded files
+            is_editorial_collection: Whether the URL points to an editorial collection
+
+        """
+        query_file = "editorialCollection.graphql" if is_editorial_collection else "ProgramSetEpisodesQuery.graphql"
+        query = load_graphql_query(query_file)
+
+        nodes, raw_collection_data = self._fetch_collection_nodes(query, resource_id)
+
         self._save_nodes(nodes, folder)
 
-        # Save collection metadata as <id>.json in the series/collection folder
-        if collection_data and nodes:
-            # Get the program folder path from the first node to determine where to save metadata
-            first_node = nodes[0]
-            program_set = first_node.get("programSet") or {}
-            programset_id = program_set.get("id") or collection_data.get("id") or "collection"
-            programset_title = program_set.get("title") or collection_data.get("title") or ""
+        if nodes:
+            self._save_collection_metadata(raw_collection_data, nodes, folder, is_editorial_collection)
 
-            # Create the same folder structure as used in _save_nodes
-            folder_name = self._program_folder_name(str(programset_id), str(programset_title))
+    def _save_collection_metadata(self, raw_data: dict[str, Any], nodes: list[dict], folder: str, is_editorial_collection: bool) -> None:
+        """Save collection metadata and cover image."""
+        collection_data = self._extract_collection_data(raw_data) if is_editorial_collection else self._extract_program_set_data(raw_data)
 
-            program_path = os.path.join(folder, folder_name)
-            self._save_collection_data(collection_data, program_path, is_editorial_collection)
+        # Get the program folder path from the first node
+        first_node = nodes[0]
+        program_set = first_node.get("programSet") or {}
+        programset_id = program_set.get("id") or collection_data.get("id") or "collection"
+        programset_title = program_set.get("title") or collection_data.get("title") or ""
+
+        folder_name = self._program_folder_name(str(programset_id), str(programset_title))
+        program_path = os.path.join(folder, folder_name)
+        self._save_collection_data(collection_data, program_path, is_editorial_collection)
 
     def _save_collection_data(self, collection_data: dict, folder: str, is_editorial_collection: bool) -> None:
         """Save collection metadata as <id>.json in the series/collection folder.
@@ -351,31 +339,23 @@ class AudiothekDownloader:
             filename_base = "_".join(array_filename) if array_filename else node_id
             filename = f"{filename_base}_{node_id}"
 
-            image = node.get("image") or {}
-            image_url_template = image.get("url") or ""
-            image_url = image_url_template.replace("{width}", "2000") if image_url_template else ""
-            image_url_x1_template = image.get("url1X1") or ""
-            image_url_x1 = image_url_x1_template.replace("{width}", "2000") if image_url_x1_template else ""
-
-            audios = node.get("audios") or []
-            first_audio = audios[0] if audios and isinstance(audios[0], dict) else None
-            mp3_url = ""
-            if first_audio:
-                mp3_url = first_audio.get("downloadUrl") or first_audio.get("url") or ""
+            # Extract URLs from node
+            image_urls = self._extract_image_urls(node)
+            mp3_url = self._extract_audio_url(node)
             if not mp3_url:
                 self.logger.warning("No audio URL found for node %s", node_id)
                 continue
 
+            # Get program information
             program_set = node.get("programSet") or {}
             programset_id = program_set.get("id") or "episode"
             programset_title = program_set.get("title") or ""
 
             # Create folder name with ID and title: "123456 Show Title"
-            folder_name = self._program_folder_name(str(programset_id), str(programset_title))
-
+            folder_name = AudiothekDownloader._program_folder_name(str(programset_id), str(programset_title))
             program_path: str = os.path.join(folder, folder_name)
 
-            # get information of program
+            # Create directory
             try:
                 os.makedirs(program_path, exist_ok=True)
             except Exception as e:
@@ -383,38 +363,67 @@ class AudiothekDownloader:
                 self.logger.exception(e)
                 return
 
-            # write images
-            image_file_path = os.path.join(program_path, filename + ".jpg")
-            image_file_x1_path = os.path.join(program_path, filename + "_x1.jpg")
+            # Save images and metadata
+            self._save_images_and_metadata(
+                ImageMetadata(node_id=node_id, title=title, filename=filename, program_path=program_path, program_set=program_set, image_urls=image_urls), node
+            )
 
-            if image_url and not os.path.exists(image_file_path):
-                self._download_to_file(image_url, image_file_path)
+            # Save audio file
+            self._save_audio_file(mp3_url, filename, program_path, index + 1, len(nodes))
 
-            if image_url_x1 and not os.path.exists(image_file_x1_path):
-                self._download_to_file(image_url_x1, image_file_x1_path)
+    def _extract_image_urls(self, node: dict[str, Any]) -> dict[str, str]:
+        """Extract image URLs from node."""
+        image = node.get("image") or {}
+        image_url_template = image.get("url") or ""
+        image_url = image_url_template.replace("{width}", "2000") if image_url_template else ""
+        image_url_x1_template = image.get("url1X1") or ""
+        image_url_x1 = image_url_x1_template.replace("{width}", "2000") if image_url_x1_template else ""
 
-            # write mp3
-            mp3_file_path = os.path.join(program_path, filename + ".mp3")
+        return {"image_url": image_url, "image_url_x1": image_url_x1}
 
-            self.logger.info("Download: %s of %s -> %s", index + 1, len(nodes), mp3_file_path)
-            if not os.path.exists(mp3_file_path):
-                self._download_to_file(mp3_url, mp3_file_path)
+    def _extract_audio_url(self, node: dict[str, Any]) -> str:
+        """Extract audio URL from node."""
+        audios = node.get("audios") or []
+        first_audio = audios[0] if audios and isinstance(audios[0], dict) else None
+        if first_audio:
+            return first_audio.get("downloadUrl") or first_audio.get("url") or ""
+        return ""
 
-            # write meta
-            meta_file_path = os.path.join(program_path, filename + ".json")
-            data = {
-                "id": node_id,
-                "title": title,
-                "description": node.get("description"),
-                "summary": node.get("summary"),
-                "duration": node.get("duration"),
-                "publishDate": node.get("publishDate"),
-                "programSet": {
-                    "id": programset_id,
-                    "title": program_set.get("title"),
-                    "path": program_set.get("path"),
-                },
-            }
+    def _save_images_and_metadata(self, metadata: ImageMetadata, node: dict[str, Any]) -> None:
+        """Save images and metadata files."""
+        # Save images
+        image_file_path = os.path.join(metadata.program_path, metadata.filename + ".jpg")
+        image_file_x1_path = os.path.join(metadata.program_path, metadata.filename + "_x1.jpg")
 
-            with open(meta_file_path, "w") as f:
-                json.dump(data, f, indent=4)
+        if metadata.image_urls["image_url"] and not os.path.exists(image_file_path):
+            self._download_to_file(metadata.image_urls["image_url"], image_file_path)
+
+        if metadata.image_urls["image_url_x1"] and not os.path.exists(image_file_x1_path):
+            self._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path)
+
+        # Save metadata
+        meta_file_path = os.path.join(metadata.program_path, metadata.filename + ".json")
+        data = {
+            "id": metadata.node_id,
+            "title": metadata.title,
+            "description": node.get("description"),
+            "summary": node.get("summary"),
+            "duration": node.get("duration"),
+            "publishDate": node.get("publishDate"),
+            "programSet": {
+                "id": metadata.program_set.get("id"),
+                "title": metadata.program_set.get("title"),
+                "path": metadata.program_set.get("path"),
+            },
+        }
+
+        with open(meta_file_path, "w") as f:
+            json.dump(data, f, indent=4)
+
+    def _save_audio_file(self, mp3_url: str, filename: str, program_path: str, current_index: int, total_count: int) -> None:
+        """Save audio file."""
+        mp3_file_path = os.path.join(program_path, filename + ".mp3")
+
+        self.logger.info("Download: %s of %s -> %s", current_index, total_count, mp3_file_path)
+        if not os.path.exists(mp3_file_path):
+            self._download_to_file(mp3_url, mp3_file_path)

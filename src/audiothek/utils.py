@@ -1,7 +1,14 @@
+import logging
 import os
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .client import AudiothekClient
+    from .downloader import AudiothekDownloader
 
 REQUEST_TIMEOUT = 30
+MAX_FOLDER_NAME_LENGTH = 100
 
 
 def sanitize_folder_name(name: str) -> str:
@@ -22,8 +29,8 @@ def sanitize_folder_name(name: str) -> str:
     # Replace multiple spaces with single space
     sanitized = re.sub(r"\s+", " ", sanitized)
     # Limit length to avoid filesystem issues
-    if len(sanitized) > 100:
-        sanitized = sanitized[:100].rstrip()
+    if len(sanitized) > MAX_FOLDER_NAME_LENGTH:
+        sanitized = sanitized[:MAX_FOLDER_NAME_LENGTH].rstrip()
     return sanitized
 
 
@@ -42,3 +49,56 @@ def load_graphql_query(filename: str) -> str:
     query_path = os.path.join(graphql_dir, filename)
     with open(query_path) as f:
         return f.read()
+
+
+def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logging.Logger) -> None:
+    """Migrate existing folders to new naming schema (ID + Title).
+
+    Args:
+        folder: The output directory containing folders to migrate
+        downloader: The AudiothekDownloader instance for making API requests
+        logger: Logger instance for logging messages
+
+    """
+    if not os.path.exists(folder):
+        logger.error("Output directory %s does not exist.", folder)
+        return
+
+    logger.info("Starting folder migration in %s", folder)
+
+    # Find all subdirectories with numeric IDs
+    try:
+        for item in os.listdir(folder):
+            item_path = os.path.join(folder, item)
+            if os.path.isdir(item_path):
+                # Check if the folder name is a pure numeric ID (old format)
+                if item.isdigit():
+                    logger.info("Found old format folder: %s", item)
+
+                    # Try to get the program title by making a request
+                    resource_result = downloader._determine_resource_type_from_id(item)
+                    if not resource_result:
+                        logger.warning("Could not determine resource type for folder: %s", item)
+                        continue
+
+                    resource_type, parsed_id = resource_result
+
+                    # Get program information to extract the title
+                    title = downloader._get_program_title(parsed_id, resource_type)
+                    if title:
+                        # Create new folder name with ID and title
+                        new_folder_name = f"{item} {sanitize_folder_name(title)}"
+                        new_folder_path = os.path.join(folder, new_folder_name)
+
+                        # Rename the folder
+                        try:
+                            os.rename(item_path, new_folder_path)
+                            logger.info("Renamed: %s -> %s", item, new_folder_name)
+                        except OSError as e:
+                            logger.error("Failed to rename folder %s: %s", item, e)
+                    else:
+                        logger.warning("Could not get title for folder: %s", item)
+
+    except Exception as e:
+        logger.error("Error while migrating folders: %s", e)
+        logger.exception(e)
