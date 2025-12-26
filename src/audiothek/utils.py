@@ -4,7 +4,6 @@ import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .client import AudiothekClient
     from .downloader import AudiothekDownloader
 
 REQUEST_TIMEOUT = 30
@@ -81,7 +80,9 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
                         logger.warning("Could not determine resource type for folder: %s", item)
                         continue
 
-                    resource_type, parsed_id = resource_result
+                    # Extract resource type and ID from ResourceInfo object
+                    resource_type = resource_result.resource_type
+                    parsed_id = resource_result.resource_id
 
                     # Get program information to extract the title
                     title = downloader.client.get_title(parsed_id, resource_type)

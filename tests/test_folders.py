@@ -8,7 +8,8 @@ from typing import Any
 
 import pytest
 
-from audiothek import AudiothekClient, AudiothekDownloader
+from audiothek import AudiothekDownloader, DownloadResult, AudiothekClient
+from audiothek.models import ResourceInfo
 from audiothek.utils import migrate_folders
 
 
@@ -23,6 +24,7 @@ def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
+        return DownloadResult(success=True, message=f"Downloaded {resource_id}")
 
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
@@ -55,6 +57,7 @@ def test_update_all_folders_mixed_folder_names(tmp_path: Path, monkeypatch: pyte
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
+        return DownloadResult(success=True, message=f"Downloaded {resource_id}")
 
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
@@ -87,6 +90,7 @@ def test_update_all_folders_skips_non_numeric_folders(tmp_path: Path, monkeypatc
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
+        return DownloadResult(success=True, message=f"Downloaded {resource_id}")
 
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
@@ -137,7 +141,7 @@ def test_migrate_folders_numeric_to_named(tmp_path: Path, monkeypatch: pytest.Mo
     # Since determine_resource_type_from_id is called on instance, if we put a plain function on class, it binds.
     # So we accept 'self' (ignored) and the argument.
     def _mock_determine_resource_type_from_id(self, resource_id):
-        return "program", resource_id
+        return ResourceInfo("program", resource_id)
 
     def _mock_get_title(self, resource_id, resource_type):
         return "Test Program"
@@ -195,7 +199,7 @@ def test_migrate_folders_exception_handling(tmp_path: Path, monkeypatch: pytest.
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
 
     def _mock_determine_resource_type_from_id(self, resource_id):
-        return "program", resource_id
+        return ResourceInfo("program", resource_id)
 
     def _mock_get_title(self, resource_id, resource_type):
         return "Test Program"
@@ -247,7 +251,7 @@ def test_migrate_folders_logs_warning_when_no_title(tmp_path: Path, monkeypatch:
     (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
 
     def _mock_determine_resource_type_from_id(self, resource_id):
-        return "program", resource_id
+        return ResourceInfo("program", resource_id)
 
     def _mock_get_title(self, resource_id, resource_type):
         return None

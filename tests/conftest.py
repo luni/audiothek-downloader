@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import pytest
 from graphql import GraphQLSchema, build_schema, parse, validate
+from graphql.language.ast import OperationDefinitionNode
 
 
 @dataclass
@@ -34,7 +35,7 @@ class GraphQLMock:
 
         operation_name = None
         for definition in document.definitions:
-            if getattr(definition, "name", None) is not None:
+            if isinstance(definition, OperationDefinitionNode) and definition.name is not None:
                 operation_name = definition.name.value
                 break
 
@@ -236,3 +237,9 @@ def mock_requests_get(monkeypatch: pytest.MonkeyPatch, graphql_mock: GraphQLMock
     # Mock the Session.get method instead of requests.get
     monkeypatch.setattr("requests.Session.get", _mock_session_get)
     return _mock_session_get
+
+
+@pytest.fixture(autouse=True)
+def disable_cache_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure file-based cache is disabled during most tests."""
+    monkeypatch.setenv("AUDIOTHEK_DISABLE_CACHE", "1")

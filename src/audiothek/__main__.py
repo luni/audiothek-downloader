@@ -23,6 +23,8 @@ class DownloadRequest:
     search_type: str = "all"
     folder: str = "./output"
     proxy: str | None = None
+    cache_dir: str | None = None
+    max_workers: int = 4
 
 
 def main() -> None:
@@ -66,6 +68,18 @@ def main() -> None:
     )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
     parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default=None,
+        help="Directory for GraphQL response cache (default: ~/.cache/audiothek-downloader)",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=4,
+        help="Maximum number of parallel download workers (default: 4, max 16)",
+    )
+    parser.add_argument(
         "--proxy",
         "-p",
         type=str,
@@ -98,6 +112,8 @@ def main() -> None:
             search_type=args.search_type,
             folder=os.path.realpath(args.folder),
             proxy=args.proxy,
+            cache_dir=args.cache_dir,
+            max_workers=max(1, min(int(args.max_workers), 16)),
         )
     )
 
@@ -112,7 +128,12 @@ def _process_request(request: DownloadRequest) -> None:
         None
 
     """
-    downloader = AudiothekDownloader(request.folder, request.proxy)
+    downloader = AudiothekDownloader(
+        base_folder=request.folder,
+        proxy=request.proxy,
+        max_workers=request.max_workers,
+        cache_dir=request.cache_dir,
+    )
 
     if request.migrate_folders_flag:
         migrate_folders(request.folder, downloader, downloader.logger)

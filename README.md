@@ -1,109 +1,99 @@
-# Audiothek Downloader
+# ARD Audiothek Downloader
 
-This CLI downloads ARD Audiothek programs, editorial collections, or individual episodes and stores the MP3 files, cover art (16:9 + 1:1), and metadata JSON locally.
+A powerful Python tool for downloading content from the ARD Audiothek platform. Download entire programs, editorial collections, or individual episodes with metadata, cover art, and audio files in the highest available quality.
+
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Features
 
-- Detects whether a URL points to a program, a curated/editorial collection, or a single episode.
-- Iterates through paginated GraphQL responses to download every available episode (continues until the API says no more pages).
-- Saves cover images, MP3s, and rich metadata in a predictable folder hierarchy.
-- Skips files that already exist, so reruns are effectively resumable.
-- Update existing folders by crawling through subdirectories and refreshing content.
-- Support for direct resource IDs (URNs or numeric IDs) as an alternative to URLs.
-- Refactored into a proper Python library with CLI interface.
-- **Proxy support** for HTTP/HTTPS/SOCKS5 proxies.
-- **Smart audio format detection** (MP3, MP4, AAC, M4A) with automatic file extension selection.
-- **File modification time preservation** based on episode publish dates.
-- **Intelligent re-download logic** that skips smaller files and restores incomplete downloads.
-- **Content comparison** to avoid unnecessary file writes when content is unchanged.
-
-## Requirements
-
-- Python >= 3.10
-- [uv](https://docs.astral.sh/uv/) for dependency management (recommended; project tooling assumes it).
+- **Smart Content Detection**: Automatically identifies programs, collections, or episodes from URLs or IDs
+- **Complete Collection Download**: Downloads all episodes from a program or collection with pagination support
+- **High Quality Media**: Selects the highest quality audio available (MP3, MP4, AAC, M4A)
+- **Rich Metadata**: Preserves episode details, publish dates, and cover images
+- **Efficient Updates**: Only downloads new or updated content
+- **Intelligent File Management**:
+  - Preserves file modification times based on publish dates
+  - Automatically selects correct file extensions
+  - Compares content to avoid unnecessary writes
+  - Re-downloads incomplete files while preserving originals
+  - Skips smaller/lower quality files when better versions exist
+- **Network Features**:
+  - Support for HTTP/HTTPS/SOCKS5 proxies
+  - Fallback URL support when primary sources fail
+- **Flexible Usage**: Command-line interface and Python library API
 
 ## Installation
 
+### Requirements
+
+- Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) for dependency management
+
+### Setup
+
 ```bash
+# Clone the repository
 git clone https://github.com/luni/audiothek-downloader.git
 cd audiothek-downloader
 
-# Install uv if you do not have it yet
+# Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create the virtual environment and install dependencies
+# Create virtual environment and install dependencies
 uv sync
 
-# Install the package in editable mode
+# Install the package in development mode
 uv pip install -e .
 ```
 
-## Usage
+## Command-Line Usage
 
-Get a quick overview of the available options:
+### Basic Commands
 
 ```bash
+# Get help
 audiothek --help
-```
 
-| Option        | Description                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------- |
-| `--url`, `-u` | Audiothek URL (program, editorial collection, page, or single episode URN).                       |
-| `--id`, `-i` | Audiothek resource ID directly (e.g. `urn:ard:episode:123456789` or `123456789`).                 |
-| `--update-folders` | Update all subfolders in output directory by crawling through existing IDs.                       |
-| `--folder`, `-f` | Destination directory. Defaults to `./output` (paths will be resolved absolutely). |
-| `--proxy`, `-p` | Proxy URL (supports HTTP, HTTPS, and SOCKS5 proxies). |
+# Download a program (all episodes)
+audiothek --url 'https://www.ardaudiothek.de/sendung/example-program/12345678/'
 
-### Download a program (all episodes)
+# Download a single episode
+audiothek --url 'https://www.ardaudiothek.de/episode/example/urn:ard:episode:1234567890abcdef/'
 
-```bash
-audiothek --url 'https://www.ardaudiothek.de/sendung/j-r-r-tolkien-der-herr-der-ringe-fantasy-hoerspiel-klassiker/12197351/'
-```
-
-### Download an editorial collection
-
-```bash
-audiothek --url 'https://www.ardaudiothek.de/seite/hoerenswertes/urn:ard:page:5a615c6cb3a42c0001cfbaf8/'
-```
-
-### Download a single episode via URN
-
-```bash
-audiothek --url 'https://www.ardaudiothek.de/episode/foo/urn:ard:episode:1234567890abcdef/'
-```
-
-### Download using resource ID directly
-
-```bash
-# Download a program by numeric ID
-audiothek --id '12197351'
-
-# Download an episode by URN
+# Download using direct ID
 audiothek --id 'urn:ard:episode:1234567890abcdef'
 
-# Download a collection by URN
-audiothek --id 'urn:ard:page:5a615c6cb3a42c0001cfbaf8'
-```
-
-### Update all existing folders
-
-```bash
-# Crawl through all subfolders in the output directory and update them
+# Update all existing downloads
 audiothek --update-folders
-
-# Update folders in a custom directory
-audiothek --update-folders --folder '/path/to/archive'
 ```
 
-### Store files in a custom directory
+### Command Options
+
+| Option | Description |
+|--------|-------------|
+| `--url`, `-u` | ARD Audiothek URL to download |
+| `--id`, `-i` | Direct resource ID (URN or numeric) |
+| `--folder`, `-f` | Output directory (default: `./output`) |
+| `--cache-dir` | Directory for the on-disk GraphQL response cache (default: `~/.cache/audiothek-downloader`) |
+| `--update-folders` | Update all existing downloads in the output directory |
+| `--migrate-folders` | Migrate folders to new naming schema (ID + Title) |
+| `--remove-lower-quality` | Remove lower quality files when higher quality exists |
+| `--editorial-category-id` | Search by editorial category ID |
+| `--search-type` | Filter type for editorial category search |
+| `--max-workers` | Maximum number of parallel download workers (default: 4, max: 16) |
+| `--proxy`, `-p` | Proxy URL for network requests |
+| `--dry-run` | Show what would be done without making changes |
+
+## Advanced Usage
+
+### Custom Output Directory
 
 ```bash
-audiothek \
-  --url 'https://www.ardaudiothek.de/sendung/example/12345678/' \
-  --folder '/path/to/archive'
+audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --folder '/path/to/archive'
 ```
 
-### Use a proxy
+### Using a Proxy
 
 ```bash
 # HTTP proxy
@@ -113,82 +103,113 @@ audiothek --url 'https://example.com/audiothek-url' --proxy 'http://proxy.exampl
 audiothek --url 'https://example.com/audiothek-url' --proxy 'socks5://proxy.example.com:1080'
 ```
 
-## Development
-
-### Running as Module
-
-You can also run the package as a Python module:
+### Quality Management
 
 ```bash
-uv run python -m audiothek --help
-uv run python -m audiothek --url 'https://example.com/audiothek-url'
+# Remove lower quality files (MP3 128kbit) when higher quality exists (MP4/AAC >=96kbit)
+audiothek --remove-lower-quality --folder '/path/to/archive'
+
+# Preview what would be removed without making changes
+audiothek --remove-lower-quality --dry-run --folder '/path/to/archive'
 ```
 
-### Using as a Library
+### GraphQL Response Caching
 
-The refactored code can be used as a Python library:
+The downloader caches GraphQL responses in a small SQLite database to minimize duplicate API calls and speed up repeated downloads.
+
+- **Default location**: `$XDG_CACHE_HOME/audiothek-downloader` or `~/.cache/audiothek-downloader`
+- **CLI override**: `--cache-dir /path/to/cache`
+- **TTL**: Entries are reused for up to 6 hours
+- **Disable caching**: Set `AUDIOTHEK_DISABLE_CACHE=1` (or `true`, `yes`) before running the CLI
+
+Example:
+
+```bash
+# Store cache inside the project directory
+audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --cache-dir './.cache/audiothek'
+
+# Temporarily disable caching
+AUDIOTHEK_DISABLE_CACHE=1 audiothek --id 'urn:ard:episode:1234567890abcdef'
+```
+
+### Parallel Download Workers
+
+Episode downloads run concurrently to improve throughput. Control the concurrency with `--max-workers` (default: `4`, max `16`):
+
+```bash
+# Use 8 worker threads for faster downloads on fast connections
+audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --max-workers 8
+```
+
+Using more workers increases CPU/network usage. If you encounter rate limits or run on low-powered hardware, reduce the value (minimum `1`).
+
+## Python Library Usage
 
 ```python
 from audiothek import AudiothekDownloader, AudiothekClient
 
 # Create downloader instance
-downloader = AudiothekDownloader("/path/to/output")
+downloader = AudiothekDownloader(base_folder="/path/to/output", proxy=None)
 
-# Download from URL
+# Download content by URL
 downloader.download_from_url("https://www.ardaudiothek.de/sendung/example/12345678/")
 
-# Download from ID
-downloader.download_from_id("urn:ard:episode:1234567890abcdef", "/path/to/output")
+# Download content by ID
+downloader.download_from_id("urn:ard:episode:1234567890abcdef")
 
-# Update existing folders
-downloader.update_all_folders("/path/to/archive")
+# Update existing downloads
+downloader.update_all_folders()
+
+# Remove lower quality duplicates
+downloader.remove_lower_quality_files(dry_run=True)
 
 # Use the client directly for API operations
 client = AudiothekClient()
-program_data = client.fetch_program_set_data("12345678")
+program_sets = client.find_program_sets_by_editorial_category_id("category123")
 ```
 
-### Testing
-
-Run the test suite:
-
-```bash
-uv run make test
-```
-
-The project maintains 90%+ test coverage with 177 passing tests.
-
-## Output structure
-
-Episodes are grouped by program set ID inside the chosen folder:
+## Output Structure
 
 ```
 output/
-  <program_set_id>/
-    <slug>_<episode_id>.mp3/.mp4/.m4a/.aac  # Audio file with correct extension
-    <slug>_<episode_id>.jpg        # 16:9 cover
-    <slug>_<episode_id>_x1.jpg     # 1:1 cover
-    <slug>_<episode_id>.json       # metadata (title, summary, duration, publish date, etc.)
+  <program_id> <program_title>/
+    <slug>_<episode_id>.mp3/.mp4/.m4a/.aac  # Audio file with appropriate extension
+    <slug>_<episode_id>.jpg                 # 16:9 cover image
+    <slug>_<episode_id>_x1.jpg              # 1:1 cover image
+    <slug>_<episode_id>.json                # Episode metadata
+    <program_id>.json                       # Program metadata
+    <program_id>.jpg                        # Program cover image
 ```
 
-## GraphQL queries
+## Development
 
-The script relies on the public `https://api.ardaudiothek.de/graphql` endpoint and ships the queries in the `src/audiothek/graphql/` directory:
+### Running Tests
 
-- `ProgramSetEpisodesQuery.graphql` for regular shows
-- `editorialCollection.graphql` for curated collections
-- `EpisodeQuery.graphql` for single episodes
+```bash
+# Run the test suite
+uv run make test
 
-You can tweak these documents if ARD changes their API structure.
+# Run specific validation tools
+uv run make validate
+```
 
-## Notes & limitations
+### Code Quality Tools
 
-1. Only episodes that expose a `downloadUrl` (or fallback `url`) can be saved—DRM-protected content may not download.
-2. Large feeds are paginated in batches of 24 items; the downloader loops until `hasNextPage` is `false`.
-3. Respect ARD Audiothek's terms of service and only download content you are allowed to store locally.
-4. The `--update-folders` functionality replaces the previous `scrape.sh` script for updating existing downloads.
-5. The project has been refactored into a proper Python package with a clean separation between library code and CLI interface.
-6. **Audio files are automatically assigned the correct extension** based on the URL format (.mp3, .mp4, .m4a, .aac).
-7. **File modification times are set** to match the episode's publish date for better organization.
-8. **Incomplete downloads are automatically detected** and re-downloaded, with smaller files being skipped to save bandwidth.
-9. **Proxy support is available** for users behind corporate firewalls or in regions with restricted access.
+The project uses several code quality tools:
+- `ruff` for linting and formatting
+- `pytest` with high coverage requirements
+- `pyright` for type checking
+- `bandit` for security analysis
+- `vulture` for dead code detection
+- `radon`/`xenon` for complexity analysis
+
+## Notes & Limitations
+
+- Only episodes with accessible `downloadUrl` or streaming `url` can be downloaded
+- DRM-protected content may not be downloadable
+- Please respect ARD Audiothek's terms of service
+- API changes by ARD may require updates to the GraphQL queries in `src/audiothek/graphql/`
+
+## License
+
+This project is licensed under the Mozilla Public License Version 2.0 - see the [LICENSE](LICENSE) file for details.

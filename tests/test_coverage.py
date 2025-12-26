@@ -20,7 +20,7 @@ def test_find_program_sets_by_editorial_category_id_pagination(tmp_path: Path, m
 
     calls = []
 
-    def _mock_graphql_get(self, query, variables):
+    def _mock_graphql_get(self, query, variables, query_name=""):
         calls.append(variables)
         if variables["offset"] == 0:
             return {
@@ -55,7 +55,7 @@ def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_sectio
     """Test find_editorial_collections_by_editorial_category_id breaks when no sections."""
     client = AudiothekClient()
 
-    def _mock_graphql_get(self, query, variables):
+    def _mock_graphql_get(self, query, variables, query_name=""):
         return {
             "data": {
                 "result": {
@@ -77,7 +77,7 @@ def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_new_co
 
     call_count = 0
 
-    def _mock_graphql_get(self, query, variables):
+    def _mock_graphql_get(self, query, variables, query_name=""):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -133,41 +133,41 @@ def test_migrate_folders_nonexistent_directory(tmp_path: Path, monkeypatch: pyte
 
 
 def test_get_program_title_episode_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_title with episode resource type."""
-    downloader = AudiothekDownloader()
+    """Test get_title with episode resource type."""
+    client = AudiothekClient()
 
     def _mock_get_episode_title(resource_id):
         return "Episode Title"
 
-    monkeypatch.setattr(downloader.client, "get_episode_title", _mock_get_episode_title)
+    monkeypatch.setattr(client, "get_episode_title", _mock_get_episode_title)
 
-    result = downloader._get_program_title("ep123", "episode")
+    result = client.get_title("ep123", "episode")
     assert result == "Episode Title"
 
 
 def test_get_program_title_program_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_title with program resource type."""
-    downloader = AudiothekDownloader()
+    """Test get_title with program resource type."""
+    client = AudiothekClient()
 
     def _mock_get_program_set_title(resource_id):
         return "Program Title"
 
-    monkeypatch.setattr(downloader.client, "get_program_set_title", _mock_get_program_set_title)
+    monkeypatch.setattr(client, "get_program_set_title", _mock_get_program_set_title)
 
-    result = downloader._get_program_title("ps123", "program")
+    result = client.get_title("ps123", "program")
     assert result == "Program Title"
 
 
 def test_get_program_title_collection_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_title with collection resource type."""
-    downloader = AudiothekDownloader()
+    """Test get_title with collection resource type."""
+    client = AudiothekClient()
 
     def _mock_get_program_set_title(resource_id):
         return "Collection Title"
 
-    monkeypatch.setattr(downloader.client, "get_program_set_title", _mock_get_program_set_title)
+    monkeypatch.setattr(client, "get_program_set_title", _mock_get_program_set_title)
 
-    result = downloader._get_program_title("col123", "collection")
+    result = client.get_title("col123", "collection")
     assert result == "Collection Title"
 
 
@@ -185,7 +185,7 @@ def test_save_collection_data_error_handling(tmp_path: Path, monkeypatch: pytest
     with caplog.at_level("ERROR"):
         downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
-    assert any("Error saving editorial collection data" in r.message for r in caplog.records)
+    assert any("Failed to write JSON data" in r.message for r in caplog.records)
 
 
 def test_save_collection_data_program_set_error_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -202,4 +202,4 @@ def test_save_collection_data_program_set_error_handling(tmp_path: Path, monkeyp
     with caplog.at_level("ERROR"):
         downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=False)
 
-    assert any("Error saving program set data" in r.message for r in caplog.records)
+    assert any("Failed to write JSON data" in r.message for r in caplog.records)

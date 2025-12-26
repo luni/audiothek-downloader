@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 import requests
 
+from audiothek.file_utils import compare_json_content
 from audiothek import AudiothekClient, AudiothekDownloader
 from tests.conftest import MockResponse
 
@@ -107,18 +108,21 @@ def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pyte
     client = AudiothekClient()
 
     def _mock_requests_get_valid(self, *args, **kwargs):
-        class MockResponse:
-            def json(self):
-                return {
-                    "data": {
-                        "result": {
-                            "programSet": {
-                                "title": "Test Program Title"
+            class MockResponse:
+                def json(self):
+                    return {
+                        "data": {
+                            "result": {
+                                "programSet": {
+                                    "title": "Test Program Title"
+                                }
                             }
                         }
                     }
-                }
-        return MockResponse()
+
+                def raise_for_status(self):
+                    pass
+            return MockResponse()
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
 
@@ -148,6 +152,9 @@ def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: 
                         }
                     }
                 }
+
+            def raise_for_status(self):
+                pass
         return MockResponse()
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
@@ -294,7 +301,7 @@ def test_save_collection_data_directory_creation_error(tmp_path: Path, monkeypat
         downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
 
     # Should have logged error
-    assert any("Couldn't create output directory" in r.message for r in caplog.records)
+    assert any("Couldn't create directory" in r.message for r in caplog.records)
 
 
 def test_save_collection_data_downloads_cover_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -442,55 +449,46 @@ def test_download_collection_with_program_set_id_from_url(tmp_path: Path, mock_r
 
 
 def test_should_skip_json_write_no_existing_file(tmp_path: Path) -> None:
-    """Test _should_skip_json_write when file doesn't exist."""
-    downloader = AudiothekDownloader()
+    """Test compare_json_content when file doesn't exist."""
     new_data = {"id": "test", "title": "Test"}
     file_path = tmp_path / "nonexistent.json"
 
-    result = downloader._should_skip_json_write(str(file_path), new_data)
+    result = compare_json_content(str(file_path), new_data)
     assert result is False
 
 
 def test_should_skip_json_write_different_content(tmp_path: Path) -> None:
-    """Test _should_skip_json_write when content is different."""
-    downloader = AudiothekDownloader()
-
+    """Test compare_json_content when content is different."""
     # Create existing file with different content
     existing_file = tmp_path / "existing.json"
     existing_data = {"id": "old", "title": "Old Title"}
     existing_file.write_text(json.dumps(existing_data, indent=4))
 
     new_data = {"id": "new", "title": "New Title"}
-
-    result = downloader._should_skip_json_write(str(existing_file), new_data)
+    result = compare_json_content(str(existing_file), new_data)
     assert result is False
 
 
 def test_should_skip_json_write_same_content(tmp_path: Path) -> None:
-    """Test _should_skip_json_write when content is identical."""
-    downloader = AudiothekDownloader()
-
+    """Test compare_json_content when content is identical."""
     # Create existing file
     existing_file = tmp_path / "existing.json"
     data = {"id": "test", "title": "Test", "nested": {"key": "value"}}
     existing_file.write_text(json.dumps(data, indent=4))
 
     # Test with same data
-    result = downloader._should_skip_json_write(str(existing_file), data)
+    result = compare_json_content(str(existing_file), data)
     assert result is True
 
 
 def test_should_skip_json_write_corrupted_file(tmp_path: Path) -> None:
-    """Test _should_skip_json_write when existing file is corrupted."""
-    downloader = AudiothekDownloader()
-
+    """Test compare_json_content when existing file is corrupted."""
     # Create corrupted JSON file
     corrupted_file = tmp_path / "corrupted.json"
     corrupted_file.write_text('{"invalid": json}')
 
     new_data = {"id": "test", "title": "Test"}
-
-    result = downloader._should_skip_json_write(str(corrupted_file), new_data)
+    result = compare_json_content(str(corrupted_file), new_data)
     assert result is False
 
 

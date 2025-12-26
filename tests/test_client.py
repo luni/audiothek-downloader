@@ -8,10 +8,9 @@ from unittest.mock import Mock, patch
 
 import pytest
 import requests
+from audiothek.exceptions import DownloadError
 
-from audiothek import AudiothekClient
-from audiothek.utils import load_graphql_query
-from tests.conftest import GraphQLMock, MockResponse
+from audiothek import AudiothekClient, ResourceInfo
 
 
 class TestAudiothekClient:
@@ -83,30 +82,30 @@ class TestAudiothekClient:
     def test_parse_url_with_urn_episode(self) -> None:
         """Test parsing URL with episode URN."""
         client = AudiothekClient()
-        result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/episode/urn:ard:episode:test123")
+        result = client.parse_url("https://www.ardaudiothek.de/episode/test-show/test-episode/urn:ard:episode:test123")
 
-        assert result == ("episode", "urn:ard:episode:test123")
+        assert result == ResourceInfo(resource_type="episode", resource_id="urn:ard:episode:test123")
 
     def test_parse_url_with_urn_collection(self) -> None:
         """Test parsing URL with collection URN."""
         client = AudiothekClient()
         result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/collection/urn:ard:page:test123")
 
-        assert result == ("collection", "urn:ard:page:test123")
+        assert result == ResourceInfo(resource_type="collection", resource_id="urn:ard:page:test123")
 
     def test_parse_url_with_urn_program(self) -> None:
         """Test parsing URL with program URN."""
         client = AudiothekClient()
         result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/program/urn:ard:show:test123")
 
-        assert result == ("program", "urn:ard:show:test123")
+        assert result == ResourceInfo(resource_type="program", resource_id="urn:ard:show:test123")
 
     def test_parse_url_with_numeric_id(self) -> None:
         """Test parsing URL with numeric ID."""
         client = AudiothekClient()
         result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/program/123456")
 
-        assert result == ("program", "123456")
+        assert result == ResourceInfo(resource_type="program", resource_id="123456")
 
     def test_parse_url_invalid(self) -> None:
         """Test parsing invalid URL."""
@@ -120,35 +119,35 @@ class TestAudiothekClient:
         client = AudiothekClient()
         result = AudiothekClient.determine_resource_type_from_id("urn:ard:episode:test123")
 
-        assert result == ("episode", "urn:ard:episode:test123")
+        assert result == ResourceInfo(resource_type="episode", resource_id="urn:ard:episode:test123")
 
     def test_determine_resource_type_from_id_collection(self) -> None:
         """Test determining resource type from collection ID."""
         client = AudiothekClient()
         result = AudiothekClient.determine_resource_type_from_id("urn:ard:page:test123")
 
-        assert result == ("collection", "urn:ard:page:test123")
+        assert result == ResourceInfo(resource_type="collection", resource_id="urn:ard:page:test123")
 
     def test_determine_resource_type_from_id_program(self) -> None:
         """Test determining resource type from program ID."""
         client = AudiothekClient()
         result = AudiothekClient.determine_resource_type_from_id("urn:ard:show:test123")
 
-        assert result == ("program", "urn:ard:show:test123")
+        assert result == ResourceInfo(resource_type="program", resource_id="urn:ard:show:test123")
 
     def test_determine_resource_type_from_id_numeric(self) -> None:
         """Test determining resource type from numeric ID."""
         client = AudiothekClient()
         result = AudiothekClient.determine_resource_type_from_id("123456")
 
-        assert result == ("program", "123456")
+        assert result == ResourceInfo(resource_type="program", resource_id="123456")
 
     def test_determine_resource_type_from_id_alphanumeric(self) -> None:
         """Test determining resource type from alphanumeric ID."""
         client = AudiothekClient()
         result = AudiothekClient.determine_resource_type_from_id("ps1")
 
-        assert result == ("program", "ps1")
+        assert result == ResourceInfo(resource_type="program", resource_id="ps1")
 
     def test_determine_resource_type_from_id_invalid(self) -> None:
         """Test determining resource type from invalid ID."""
@@ -175,7 +174,7 @@ class TestAudiothekClient:
 
         assert result == "Test Program"
         mock_load_query.assert_called_once_with("EpisodeQuery.graphql")
-        mock_graphql_get.assert_called_once_with("query", {"id": "urn:ard:episode:test123"})
+        mock_graphql_get.assert_called_once_with("query", {"id": "urn:ard:episode:test123"}, "EpisodeQuery")
 
     @patch.object(AudiothekClient, '_graphql_get')
     @patch('audiothek.client.load_graphql_query')
@@ -199,7 +198,7 @@ class TestAudiothekClient:
 
         assert result == "Test Program"
         mock_load_query.assert_called_once_with("ProgramSetEpisodesQuery.graphql")
-        mock_graphql_get.assert_called_once_with("query", {"id": "123456", "offset": 0, "count": 1})
+        mock_graphql_get.assert_called_once_with("query", {"id": "123456", "offset": 0, "count": 1}, "ProgramSetEpisodesQuery")
 
     @patch.object(AudiothekClient, '_graphql_get')
     @patch('audiothek.client.load_graphql_query')
@@ -225,7 +224,7 @@ class TestAudiothekClient:
         assert result[0]["id"] == "1"
         assert result[1]["id"] == "2"
         mock_load_query.assert_called_once_with("ProgramSetsByEditorialCategoryId.graphql")
-        mock_graphql_get.assert_called_once_with("query", {"editorialCategoryId": "cat123", "offset": 0, "count": 10})
+        mock_graphql_get.assert_called_once_with("query", {"editorialCategoryId": "cat123", "offset": 0, "count": 10}, "ProgramSetsByEditorialCategoryId")
 
     @patch.object(AudiothekClient, '_graphql_get')
     @patch('audiothek.client.load_graphql_query')
@@ -258,7 +257,7 @@ class TestAudiothekClient:
         assert mock_graphql_get.call_count >= 1
         # Check first call parameters
         first_call = mock_graphql_get.call_args_list[0]
-        assert first_call[0] == ("query", {"id": "cat123", "offset": 0, "count": 10})
+        assert first_call[0] == ("query", {"id": "cat123", "offset": 0, "count": 10}, "EditorialCategoryCollections")
 
     def test_load_graphql_query(self, tmp_path: Path) -> None:
         """Test loading GraphQL query from file."""
@@ -381,7 +380,7 @@ class TestAudiothekClient:
 
         client = AudiothekClient()
 
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(DownloadError):
             client._fetch_and_validate_audio("http://example.com/audio.mp3")
 
     @patch('requests.Session.get')

@@ -2,6 +2,7 @@
 
 import json
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,9 @@ from typing import Any
 import pytest
 import requests
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekDownloader, ResourceInfo
+from audiothek.file_utils import set_file_modification_time
+from audiothek.models import DownloadResult
 from tests.conftest import GraphQLMock, MockResponse
 
 
@@ -51,7 +54,7 @@ def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_
 
     # Ensure pagination occurred: graphql was called twice for ProgramSetEpisodesQuery
     calls = [c for c in graphql_mock.calls if c["operation"] == "ProgramSetEpisodesQuery"]
-    assert len(calls) == 2
+    assert len(calls) == 3  # 2 for pagination + 1 for program set metadata
     assert calls[0]["variables"]["offset"] == 0
     assert calls[1]["variables"]["offset"] == 24
 
@@ -78,6 +81,9 @@ def test_download_single_episode_not_found_logs_and_returns(tmp_path: Path, capl
         class _Resp:
             def json(self):
                 return {"data": {"result": None}}
+
+            def raise_for_status(self):
+                pass
         return _Resp()
 
     monkeypatch.setattr("requests.Session.get", _mock_get)
@@ -140,7 +146,7 @@ def test_save_nodes_directory_creation_error_logs_and_returns(tmp_path: Path, mo
         downloader = AudiothekDownloader()
         downloader._save_nodes(nodes, str(tmp_path))
 
-    assert any("Couldn't create output directory" in r.message for r in caplog.records)
+    assert any("Couldn't create directory" in r.message for r in caplog.records)
 
 
 def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -419,12 +425,22 @@ def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.M
 
     def _mock_download_single_episode(self, episode_id, folder):
         calls.append(("download_single_episode", episode_id, folder))
+        return DownloadResult(success=True, message="Success")
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
+        return DownloadResult(success=True, message="Success")
+
+    def _mock_determine_resource_type_from_id(resource_id):
+        if resource_id == "urn:ard:episode:123":
+            return ResourceInfo(resource_type="episode", resource_id=resource_id)
+        elif resource_id == "urn:ard:page:456":
+            return ResourceInfo(resource_type="collection", resource_id=resource_id)
+        else:
+            return ResourceInfo(resource_type="program", resource_id=resource_id)
 
     # Mock client method instead of downloader wrapper
-    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", lambda rid: ("program", rid))
+    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
 
     monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
@@ -438,29 +454,35 @@ def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_download_from_id_with_custom_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test download_from_id uses custom folder when provided."""
+    """Test download_from_id uses provided folder."""
     downloader = AudiothekDownloader("/default/path")
 
     calls = []
 
     def _mock_download_single_episode(self, episode_id, folder):
         calls.append(("download_single_episode", episode_id, folder))
+        return DownloadResult(success=True, message="Success")
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder))
+        return DownloadResult(success=True, message="Success")
+
+    def _mock_determine_resource_type_from_id(resource_id):
+        return ResourceInfo(resource_type="episode", resource_id=resource_id)
 
     # Mock client method instead of downloader wrapper
-    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", lambda rid: ("episode", rid))
+    monkeypatch.setattr(downloader.client, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
 
     monkeypatch.setattr(AudiothekDownloader, "_download_single_episode", _mock_download_single_episode)
     monkeypatch.setattr(AudiothekDownloader, "_download_collection", _mock_download_collection)
 
-    downloader.download_from_id("test_id", str(tmp_path))
+    custom_folder = str(tmp_path / "custom")
+    downloader.download_from_id("test_id", folder=custom_folder)
 
     # Should have used the custom folder and called download_single_episode
     assert len(calls) == 1
     assert calls[0][0] == "download_single_episode"
-    assert calls[0][2] == str(tmp_path)
+    assert calls[0][2] == custom_folder
 
 
 def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -473,7 +495,7 @@ def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, 
         calls.append(("download_collection", resource_id, folder, is_editorial))
 
     def _mock_parse_url(url):
-        return "collection", "test_id"
+        return ResourceInfo(resource_type="collection", resource_id="urn:ard:page:123")
 
     # Mock client method instead of downloader wrapper (note: parse_url is static in client but used as instance method if not careful,
     # but here we mock it on the instance's client or class)
@@ -487,7 +509,8 @@ def test_download_from_url_calls_collection_with_editorial_flag(tmp_path: Path, 
     # Should have called download_collection with is_editorial=True for collection
     assert len(calls) == 1
     assert calls[0][0] == "download_collection"
-    assert calls[0][3] is True  # is_editorial flag
+    assert calls[0][1] == "urn:ard:page:123"
+    assert calls[0][3] is True  # is_editorial flag for program type
 
 
 def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,9 +521,10 @@ def test_download_from_url_calls_collection_for_program(tmp_path: Path, monkeypa
 
     def _mock_download_collection(self, resource_id, folder, is_editorial):
         calls.append(("download_collection", resource_id, folder, is_editorial))
+        return DownloadResult(success=True, message="Success")
 
     def _mock_parse_url(url):
-        return "program", "test_id"
+        return ResourceInfo(resource_type="program", resource_id="test_id")
 
     # Mock client method instead of downloader wrapper
     monkeypatch.setattr(downloader.client, "parse_url", _mock_parse_url)
@@ -530,7 +554,7 @@ def test_file_modification_time_set_from_publish_date(tmp_path: Path, mock_reque
 
     # Set modification time to a specific publish date
     publish_date = "2023-12-01T10:00:00.000Z"
-    downloader._set_file_modification_time(str(test_file), publish_date)
+    set_file_modification_time(str(test_file), publish_date, logging.getLogger(__name__))
 
     # Check that modification time was updated
     updated_mtime = test_file.stat().st_mtime
@@ -635,9 +659,9 @@ def test_all_files_get_timestamp_from_publish_date(tmp_path: Path, mock_requests
     publish_date = "2023-11-15T14:30:00.000Z"
     expected_time = datetime.fromisoformat("2023-11-15T14:30:00.000+00:00").timestamp()
 
-    downloader._set_file_modification_time(str(audio_file), publish_date)
-    downloader._set_file_modification_time(str(image_file), publish_date)
-    downloader._set_file_modification_time(str(metadata_file), publish_date)
+    set_file_modification_time(str(audio_file), publish_date, logging.getLogger(__name__))
+    set_file_modification_time(str(image_file), publish_date, logging.getLogger(__name__))
+    set_file_modification_time(str(metadata_file), publish_date, logging.getLogger(__name__))
 
     # Check that all files have the correct modification time
     for file_path in [audio_file, image_file, metadata_file]:
@@ -737,7 +761,7 @@ def test_save_audio_file_restores_backup_on_download_failure(tmp_path: Path, mon
 
     # Should log backup creation and restoration
     log_messages = [r.message for r in caplog.records]
-    assert any("Backed up smaller file to:" in msg for msg in log_messages)
+    assert any("Backed up file to:" in msg for msg in log_messages)
     assert any("Restored original file from backup:" in msg for msg in log_messages)
 
     # Original file should be restored

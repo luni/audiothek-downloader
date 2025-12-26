@@ -1,6 +1,7 @@
 """Tests for CLI and main function functionality."""
 
 import argparse
+import logging
 import os
 import runpy
 import sys
@@ -125,13 +126,15 @@ def test_argument_parser_setup() -> None:
         help="Update all subfolders in output directory by crawling through existing IDs",
     )
     parser.add_argument("--folder", "-f", type=str, default="./output", help="Folder to save all mp3s")
+    parser.add_argument("--cache-dir", type=str, default=None, help="Directory for GraphQL response cache")
 
     # Test parsing with URL
-    args = parser.parse_args(["--url", "https://example.com", "--folder", "/tmp"])
+    args = parser.parse_args(["--url", "https://example.com", "--folder", "/tmp", "--cache-dir", "/cache"])
     assert args.url == "https://example.com"
     assert args.id == ""
     assert args.update_folders is False
     assert args.folder == "/tmp"
+    assert args.cache_dir == "/cache"
 
     # Test parsing with ID
     args = parser.parse_args(["--id", "urn:ard:episode:test"])
@@ -139,6 +142,7 @@ def test_argument_parser_setup() -> None:
     assert args.id == "urn:ard:episode:test"
     assert args.update_folders is False
     assert args.folder == "./output"
+    assert args.cache_dir is None
 
     # Test parsing with --update-folders
     args = parser.parse_args(["--update-folders", "--folder", "/custom/output"])
@@ -146,6 +150,7 @@ def test_argument_parser_setup() -> None:
     assert args.id == ""
     assert args.update_folders is True
     assert args.folder == "/custom/output"
+    assert args.cache_dir is None
 
 
 def test_main_script_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -199,19 +204,78 @@ def test_main_with_update_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert calls[0] == ("update_all_folders", str(tmp_path))
 
 
+def test_process_request_passes_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure cache_dir is forwarded to the downloader."""
+    captured: dict[str, object] = {}
+
+    class DummyDownloader:
+        def __init__(
+            self,
+            base_folder: str,
+            proxy: str | None,
+            max_workers: int = 4,
+            cache_dir: str | None = None,
+            **kwargs: object,
+        ) -> None:
+            captured["ctor"] = {
+                "base_folder": base_folder,
+                "proxy": proxy,
+                "max_workers": max_workers,
+                "cache_dir": cache_dir,
+            }
+            self.logger = logging.getLogger(__name__)
+            self.client = None
+
+        def download_from_url(self, url: str, folder: str) -> None:
+            captured["download"] = {"url": url, "folder": folder}
+
+    monkeypatch.setattr("audiothek.__main__.AudiothekDownloader", DummyDownloader)
+
+    request = DownloadRequest(
+        url="https://www.ardaudiothek.de/episode/foo/urn:ard:episode:test/",
+        folder=str(tmp_path),
+        cache_dir="/tmp/cache-dir",
+    )
+
+    _process_request(request)
+
+    ctor_args = captured["ctor"]
+    assert isinstance(ctor_args, dict)
+    assert ctor_args["cache_dir"] == "/tmp/cache-dir"
+    assert ctor_args["max_workers"] == 4
+
+    download_info = captured["download"]
+    assert isinstance(download_info, dict)
+    assert download_info["folder"] == str(tmp_path)
+
+
 def test_cli_main_parses_args_and_calls_downloader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, str]] = []
+    init_calls: list[tuple[str, str | None, int, str | None]] = []
+
+    def _mock_init(self, base_folder: str, proxy: str | None = None, max_workers: int = 4, cache_dir: str | None = None):
+        init_calls.append((base_folder, proxy, max_workers, cache_dir))
 
     def _mock_download_from_url(self, url: str, folder: str) -> None:
         calls.append(("download_from_url", url, folder))
 
+    monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
     monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
 
-    argv = ["audiothek", "--url", "https://example.com/u", "--folder", str(tmp_path)]
+    argv = [
+        "audiothek",
+        "--url",
+        "https://example.com/u",
+        "--folder",
+        str(tmp_path),
+        "--max-workers",
+        "8",
+    ]
     monkeypatch.setattr("sys.argv", argv)
 
     main()
 
+    assert init_calls[0][2] == 8
     assert len(calls) == 1
     assert calls[0][0] == "download_from_url"
     assert calls[0][1] == "https://example.com/u"
@@ -222,8 +286,15 @@ def test_cli_main_with_http_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     """Test CLI main function with HTTP proxy argument."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        calls.append(("__init__", base_folder, proxy, max_workers, cache_dir))
 
     def _mock_download_from_url(self, url: str, folder: str) -> None:
         calls.append(("download_from_url", url, folder))
@@ -251,8 +322,16 @@ def test_cli_main_with_socks5_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     """Test CLI main function with SOCKS5 proxy argument."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        del max_workers
+        calls.append(("__init__", base_folder, proxy, cache_dir))
 
     def _mock_download_from_id(self, resource_id: str, folder: str) -> None:
         calls.append(("download_from_id", resource_id, folder))
@@ -280,8 +359,16 @@ def test_cli_main_without_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """Test CLI main function without proxy argument."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        del max_workers
+        calls.append(("__init__", base_folder, proxy, cache_dir))
 
     def _mock_download_from_url(self, url: str, folder: str) -> None:
         calls.append(("download_from_url", url, folder))
@@ -308,8 +395,16 @@ def test_process_request_with_proxy(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     """Test _process_request function with proxy parameter."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        del max_workers
+        calls.append(("__init__", base_folder, proxy, cache_dir))
 
     def _mock_download_from_url(self, url: str, folder: str) -> None:
         calls.append(("download_from_url", url, folder))
@@ -352,8 +447,16 @@ def test_cli_main_with_remove_lower_quality(tmp_path: Path, monkeypatch: pytest.
     """Test CLI main function with --remove-lower-quality argument."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        del max_workers
+        calls.append(("__init__", base_folder, proxy, cache_dir))
 
     def _mock_remove_lower_quality_files(self, folder: str, dry_run: bool = False) -> None:
         calls.append(("remove_lower_quality_files", folder, dry_run))
@@ -389,11 +492,16 @@ def test_main_with_editorial_category_id(tmp_path: Path, monkeypatch: pytest.Mon
         calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
         return [{"id": "test2", "title": "Test Collection"}]
 
-    def _mock_init(self, base_folder, proxy=None):
-        self.client = type('MockClient', (), {
-            'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
-            'find_editorial_collections_by_editorial_category_id': _mock_find_collections
-        })()
+    def _mock_init(self, base_folder, proxy=None, max_workers: int = 4, cache_dir=None, **_kwargs: object):
+        del max_workers
+        self.client = type(
+            "MockClient",
+            (),
+            {
+                "find_program_sets_by_editorial_category_id": _mock_find_program_sets,
+                "find_editorial_collections_by_editorial_category_id": _mock_find_collections,
+            },
+        )()
 
     monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
 
@@ -421,7 +529,8 @@ def test_main_with_editorial_category_id_program_sets_only(tmp_path: Path, monke
         calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
         return [{"id": "test2", "title": "Test Collection"}]
 
-    def _mock_init(self, base_folder, proxy=None):
+    def _mock_init(self, base_folder, proxy=None, max_workers: int = 4, cache_dir=None, **_kwargs: object):
+        del max_workers
         self.client = type('MockClient', (), {
             'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
             'find_editorial_collections_by_editorial_category_id': _mock_find_collections
@@ -451,11 +560,16 @@ def test_main_with_editorial_category_id_collections_only(tmp_path: Path, monkey
         calls.append(("find_editorial_collections_by_editorial_category_id", editorial_category_id, limit))
         return [{"id": "test2", "title": "Test Collection"}]
 
-    def _mock_init(self, base_folder, proxy=None):
-        self.client = type('MockClient', (), {
-            'find_program_sets_by_editorial_category_id': _mock_find_program_sets,
-            'find_editorial_collections_by_editorial_category_id': _mock_find_collections
-        })()
+    def _mock_init(self, base_folder, proxy=None, max_workers: int = 4, cache_dir=None, **_kwargs: object):
+        del max_workers
+        self.client = type(
+            "MockClient",
+            (),
+            {
+                "find_program_sets_by_editorial_category_id": _mock_find_program_sets,
+                "find_editorial_collections_by_editorial_category_id": _mock_find_collections,
+            },
+        )()
 
     monkeypatch.setattr(AudiothekDownloader, "__init__", _mock_init)
 
@@ -473,8 +587,16 @@ def test_cli_main_with_remove_lower_quality_dry_run(tmp_path: Path, monkeypatch:
     """Test CLI main function with --remove-lower-quality and --dry-run arguments."""
     calls: list[tuple] = []
 
-    def _mock_init(self, base_folder: str, proxy: str | None = None):
-        calls.append(("__init__", base_folder, proxy))
+    def _mock_init(
+        self,
+        base_folder: str,
+        proxy: str | None = None,
+        max_workers: int = 4,
+        cache_dir: str | None = None,
+        **_kwargs: object,
+    ):
+        del max_workers
+        calls.append(("__init__", base_folder, proxy, cache_dir))
 
     def _mock_remove_lower_quality_files(self, folder: str, dry_run: bool = False) -> None:
         calls.append(("remove_lower_quality_files", folder, dry_run))
