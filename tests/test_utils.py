@@ -82,5 +82,5 @@ def test_audiothek_downloader_initialization() -> None:
     downloader = AudiothekDownloader(custom_folder)
     assert downloader.base_folder == custom_folder
 
-    # Test that session is created
-    assert downloader._session is not None
+    # Test that client session is created
+    assert downloader.client._session is not None

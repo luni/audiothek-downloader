@@ -4,9 +4,8 @@ import os
 import re
 from typing import Any
 
-import requests
-
-from .utils import REQUEST_TIMEOUT, sanitize_folder_name
+from .client import AudiothekClient
+from .utils import load_graphql_query, sanitize_folder_name
 
 
 class AudiothekDownloader:
@@ -22,19 +21,7 @@ class AudiothekDownloader:
         """
         self.base_folder = base_folder
         self.logger = logging.getLogger(__name__)
-        self._base_dir = os.path.dirname(os.path.abspath(__file__))
-        self._graphql_dir = os.path.join(self._base_dir, "graphql")
-        self._session = requests.Session()
-
-        # Configure proxy if provided
-        if proxy:
-            proxies = {"http": proxy, "https": proxy}
-            self._session.proxies = proxies
-
-    def _load_graphql_query(self, filename: str) -> str:
-        query_path = os.path.join(self._graphql_dir, filename)
-        with open(query_path) as f:
-            return f.read()
+        self.client = AudiothekClient(proxy=proxy)
 
     def _program_folder_name(self, programset_id: str, programset_title: str) -> str:
         if programset_title:
@@ -42,83 +29,20 @@ class AudiothekDownloader:
         return programset_id
 
     def _graphql_get(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-        response = self._session.get(
-            "https://api.ardaudiothek.de/graphql",
-            params={"query": query, "variables": json.dumps(variables)},
-            timeout=REQUEST_TIMEOUT,
-        )
-        return response.json()
+        """Execute GraphQL query using client."""
+        return self.client._graphql_get(query, variables)
 
     def _download_to_file(self, url: str, file_path: str, *, check_status: bool = False) -> None:
-        response = self._session.get(url, timeout=REQUEST_TIMEOUT)
-        if check_status:
-            response.raise_for_status()
-        with open(file_path, "wb") as f:
-            f.write(response.content)
+        """Download content using client."""
+        self.client._download_to_file(url, file_path, check_status=check_status)
 
     def find_program_sets_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Find program sets by editorial category ID."""
-        query = self._load_graphql_query("ProgramSetsByEditorialCategoryId.graphql")
-
-        nodes: list[dict[str, Any]] = []
-        offset = 0
-        count = 24
-        while True:
-            remaining = max(0, limit - len(nodes))
-            if remaining == 0:
-                break
-
-            variables = {"editorialCategoryId": editorial_category_id, "offset": offset, "count": min(count, remaining)}
-            response_json = self._graphql_get(query, variables)
-            result = response_json.get("data", {}).get("result") or {}
-            page_nodes = result.get("nodes") or []
-            if isinstance(page_nodes, list):
-                nodes.extend(page_nodes)
-
-            page_info = result.get("pageInfo") or {}
-            if not page_info.get("hasNextPage"):
-                break
-            offset += count
-
-        return nodes
+        return self.client.find_program_sets_by_editorial_category_id(editorial_category_id, limit)
 
     def find_editorial_collections_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Find editorial collections by editorial category ID."""
-        query = self._load_graphql_query("EditorialCategoryCollections.graphql")
-
-        collections_by_id: dict[str, dict[str, Any]] = {}
-        offset = 0
-        count = 24
-        while True:
-            remaining = max(0, limit - len(collections_by_id))
-            if remaining == 0:
-                break
-
-            before_count = len(collections_by_id)
-
-            variables = {"id": editorial_category_id, "offset": offset, "count": min(count, remaining)}
-            response_json = self._graphql_get(query, variables)
-            result = response_json.get("data", {}).get("result") or {}
-            sections = result.get("sections") or []
-            if not isinstance(sections, list) or not sections:
-                break
-
-            for section in sections:
-                section_nodes = (section or {}).get("nodes") or []
-                if not isinstance(section_nodes, list):
-                    continue
-                for node in section_nodes:
-                    node_id = (node or {}).get("id")
-                    if not node_id:
-                        continue
-                    collections_by_id[str(node_id)] = node
-
-            if len(collections_by_id) == before_count:
-                break
-
-            offset += count
-
-        return list(collections_by_id.values())
+        return self.client.find_editorial_collections_by_editorial_category_id(editorial_category_id, limit)
 
     def download_from_url(self, url: str, folder: str | None = None) -> None:
         """Download content from an ARD Audiothek URL.
@@ -257,101 +181,18 @@ class AudiothekDownloader:
 
         """
         if resource_type == "episode":
-            return self._get_episode_title(resource_id)
+            return self.client.get_episode_title(resource_id)
         elif resource_type in ["program", "collection"]:
-            return self._get_program_set_title(resource_id)
-        return None
-
-    def _get_episode_title(self, episode_id: str) -> str | None:
-        """Get program set title from episode."""
-        try:
-            query = self._load_graphql_query("EpisodeQuery.graphql")
-            response_json = self._graphql_get(query, {"id": episode_id})
-
-            node = response_json.get("data", {}).get("result")
-            if node:
-                program_set = node.get("programSet") or {}
-                return program_set.get("title")
-        except Exception as e:
-            self.logger.error("Error getting episode title: %s", e)
-
-        return None
-
-    def _get_program_set_title(self, program_id: str) -> str | None:
-        """Get program set title directly."""
-        try:
-            query = self._load_graphql_query("ProgramSetEpisodesQuery.graphql")
-            response_json = self._graphql_get(query, {"id": program_id, "offset": 0, "count": 1})
-
-            result = response_json.get("data", {}).get("result", {})
-            if result:
-                # For editorial collections, the structure is slightly different
-                if "items" in result:
-                    items = result.get("items", {})
-                    nodes = items.get("nodes", []) or []
-                    if nodes:
-                        first_node = nodes[0]
-                        program_set = first_node.get("programSet") or {}
-                        return program_set.get("title")
-        except Exception as e:
-            self.logger.error("Error getting program set title: %s", e)
-
+            return self.client.get_program_set_title(resource_id)
         return None
 
     def _determine_resource_type_from_id(self, resource_id: str) -> tuple[str, str] | None:
-        """Determine resource type from ID pattern.
-
-        Args:
-            resource_id: The ID to analyze
-
-        Returns:
-            A tuple of (resource_type, id) where resource_type is one of 'episode', 'collection', or 'program'
-
-        """
-        if resource_id.startswith("urn:ard:episode:"):
-            return "episode", resource_id
-        if resource_id.startswith("urn:ard:page:"):
-            return "collection", resource_id
-        if resource_id.startswith("urn:ard:show:"):
-            return "program", resource_id
-        # fallback: treat other urns as program sets
-        if resource_id.startswith("urn:ard:"):
-            return "program", resource_id
-        # numeric IDs are typically programs
-        if resource_id.isdigit():
-            return "program", resource_id
-        # alphanumeric IDs (like "ps1") are also treated as programs
-        if re.match(r"^[a-zA-Z0-9]+$", resource_id):
-            return "program", resource_id
-        return None
+        """Determine resource type from ID pattern using client."""
+        return self.client.determine_resource_type_from_id(resource_id)
 
     def _parse_url(self, url: str) -> tuple[str, str] | None:
-        """Parse Audiothek URL and return (resource_type, id).
-
-        Args:
-            url: The URL to parse
-
-        Returns:
-            A tuple of (resource_type, id) where resource_type is one of 'episode', 'collection', or 'program'
-
-        """
-        urn_match = re.search(r"/(urn:ard:[^/]+)/?$", url)
-        if urn_match:
-            urn = urn_match.group(1)
-            if urn.startswith("urn:ard:episode:"):
-                return "episode", urn
-            if urn.startswith("urn:ard:page:"):
-                return "collection", urn
-            if urn.startswith("urn:ard:show:"):
-                return "program", urn
-            # fallback: treat other urns as program sets
-            return "program", urn
-
-        numeric_match = re.search(r"/(\d+)/?$", url)
-        if numeric_match:
-            return "program", numeric_match.group(1)
-
-        return None
+        """Parse Audiothek URL and return (resource_type, id) using client."""
+        return self.client.parse_url(url)
 
     def _download_single_episode(self, episode_id: str, folder: str) -> None:
         """Fetch and store a single episode.
@@ -361,7 +202,7 @@ class AudiothekDownloader:
             folder: The output directory to save the downloaded file
 
         """
-        query = self._load_graphql_query("EpisodeQuery.graphql")
+        query = load_graphql_query("EpisodeQuery.graphql")
         response_json = self._graphql_get(query, {"id": episode_id})
 
         node = response_json.get("data", {}).get("result")
@@ -382,7 +223,7 @@ class AudiothekDownloader:
 
         """
         query_file = "editorialCollection.graphql" if is_editorial_collection else "ProgramSetEpisodesQuery.graphql"
-        query = self._load_graphql_query(query_file)
+        query = load_graphql_query(query_file)
 
         nodes: list[dict] = []
         collection_data: dict | None = None

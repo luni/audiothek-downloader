@@ -1,3 +1,4 @@
+import os
 import re
 
 REQUEST_TIMEOUT = 30
@@ -24,3 +25,20 @@ def sanitize_folder_name(name: str) -> str:
     if len(sanitized) > 100:
         sanitized = sanitized[:100].rstrip()
     return sanitized
+
+
+def load_graphql_query(filename: str) -> str:
+    """Load GraphQL query from file.
+
+    Args:
+        filename: The GraphQL query filename
+
+    Returns:
+        The GraphQL query string
+
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    graphql_dir = os.path.join(base_dir, "graphql")
+    query_path = os.path.join(graphql_dir, filename)
+    with open(query_path) as f:
+        return f.read()

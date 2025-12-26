@@ -8,13 +8,13 @@ from typing import Any
 import pytest
 import requests
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekClient, AudiothekDownloader
 from tests.conftest import MockResponse
 
 
 def test_find_program_sets_by_editorial_category_id_pagination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pagination in find_program_sets_by_editorial_category_id."""
-    downloader = AudiothekDownloader()
+    client = AudiothekClient()
 
     calls = []
 
@@ -39,9 +39,9 @@ def test_find_program_sets_by_editorial_category_id_pagination(tmp_path: Path, m
                 }
             }
 
-    monkeypatch.setattr(AudiothekDownloader, "_graphql_get", _mock_graphql_get)
+    monkeypatch.setattr(AudiothekClient, "_graphql_get", _mock_graphql_get)
 
-    result = downloader.find_program_sets_by_editorial_category_id("ec123", limit=10)
+    result = client.find_program_sets_by_editorial_category_id("ec123", limit=10)
 
     assert len(result) == 3
     assert len(calls) == 2
@@ -51,7 +51,7 @@ def test_find_program_sets_by_editorial_category_id_pagination(tmp_path: Path, m
 
 def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_sections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test find_editorial_collections_by_editorial_category_id breaks when no sections."""
-    downloader = AudiothekDownloader()
+    client = AudiothekClient()
 
     def _mock_graphql_get(self, query, variables):
         return {
@@ -62,16 +62,16 @@ def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_sectio
             }
         }
 
-    monkeypatch.setattr(AudiothekDownloader, "_graphql_get", _mock_graphql_get)
+    monkeypatch.setattr(AudiothekClient, "_graphql_get", _mock_graphql_get)
 
-    result = downloader.find_editorial_collections_by_editorial_category_id("ec123")
+    result = client.find_editorial_collections_by_editorial_category_id("ec123")
 
     assert result == []
 
 
 def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_new_collections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test find_editorial_collections_by_editorial_category_id breaks when no new collections."""
-    downloader = AudiothekDownloader()
+    client = AudiothekClient()
 
     call_count = 0
 
@@ -100,9 +100,9 @@ def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_new_co
                 }
             }
 
-    monkeypatch.setattr(AudiothekDownloader, "_graphql_get", _mock_graphql_get)
+    monkeypatch.setattr(AudiothekClient, "_graphql_get", _mock_graphql_get)
 
-    result = downloader.find_editorial_collections_by_editorial_category_id("ec123")
+    result = client.find_editorial_collections_by_editorial_category_id("ec123")
 
     assert len(result) == 1
     assert call_count == 2  # Should make second call and then break
@@ -134,10 +134,10 @@ def test_get_program_title_episode_type(tmp_path: Path, monkeypatch: pytest.Monk
     """Test _get_program_title with episode resource type."""
     downloader = AudiothekDownloader()
 
-    def _mock_get_episode_title(self, resource_id):
+    def _mock_get_episode_title(resource_id):
         return "Episode Title"
 
-    monkeypatch.setattr(AudiothekDownloader, "_get_episode_title", _mock_get_episode_title)
+    monkeypatch.setattr(downloader.client, "get_episode_title", _mock_get_episode_title)
 
     result = downloader._get_program_title("ep123", "episode")
     assert result == "Episode Title"
@@ -147,10 +147,10 @@ def test_get_program_title_program_type(tmp_path: Path, monkeypatch: pytest.Monk
     """Test _get_program_title with program resource type."""
     downloader = AudiothekDownloader()
 
-    def _mock_get_program_set_title(self, resource_id):
+    def _mock_get_program_set_title(resource_id):
         return "Program Title"
 
-    monkeypatch.setattr(AudiothekDownloader, "_get_program_set_title", _mock_get_program_set_title)
+    monkeypatch.setattr(downloader.client, "get_program_set_title", _mock_get_program_set_title)
 
     result = downloader._get_program_title("ps123", "program")
     assert result == "Program Title"
@@ -160,10 +160,10 @@ def test_get_program_title_collection_type(tmp_path: Path, monkeypatch: pytest.M
     """Test _get_program_title with collection resource type."""
     downloader = AudiothekDownloader()
 
-    def _mock_get_program_set_title(self, resource_id):
+    def _mock_get_program_set_title(resource_id):
         return "Collection Title"
 
-    monkeypatch.setattr(AudiothekDownloader, "_get_program_set_title", _mock_get_program_set_title)
+    monkeypatch.setattr(downloader.client, "get_program_set_title", _mock_get_program_set_title)
 
     result = downloader._get_program_title("col123", "collection")
     assert result == "Collection Title"

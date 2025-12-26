@@ -47,7 +47,7 @@ def main() -> None:
         "-p",
         type=str,
         default=None,
-        help="Proxy URL (e.g. \"http://proxy.example.com:8080\" or \"socks5://proxy.example.com:1080\")",
+        help='Proxy URL (e.g. "http://proxy.example.com:8080" or "socks5://proxy.example.com:1080")',
     )
     parser.add_argument(
         "--search-type",

@@ -7,13 +7,13 @@ from typing import Any
 import pytest
 import requests
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekClient, AudiothekDownloader
 from tests.conftest import MockResponse
 
 
 def test_get_episode_title_api_response_handling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_episode_title with various API response scenarios."""
-    downloader = AudiothekDownloader()
+    """Test get_episode_title with various API response scenarios."""
+    client = AudiothekClient()
 
     # Test when API response has no data
     def _mock_requests_get_no_data(self, *args, **kwargs):
@@ -24,13 +24,13 @@ def test_get_episode_title_api_response_handling(tmp_path: Path, monkeypatch: py
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_data)
 
-    result = downloader._get_episode_title("test_id")
+    result = client.get_episode_title("test_id")
     assert result is None
 
 
 def test_get_program_set_title_no_items(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when response has no items."""
-    downloader = AudiothekDownloader()
+    """Test get_program_set_title when response has no items."""
+    client = AudiothekClient()
 
     def _mock_requests_get_no_items(self, *args, **kwargs):
         class MockResponse:
@@ -40,13 +40,13 @@ def test_get_program_set_title_no_items(tmp_path: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_items)
 
-    result = downloader._get_program_set_title("test_id")
+    result = client.get_program_set_title("test_id")
     assert result is None
 
 
 def test_get_program_set_title_empty_nodes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when nodes array is empty."""
-    downloader = AudiothekDownloader()
+    """Test get_program_set_title when nodes array is empty."""
+    client = AudiothekClient()
 
     def _mock_requests_get_empty_nodes(self, *args, **kwargs):
         class MockResponse:
@@ -56,39 +56,39 @@ def test_get_program_set_title_empty_nodes(tmp_path: Path, monkeypatch: pytest.M
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_empty_nodes)
 
-    result = downloader._get_program_set_title("test_id")
+    result = client.get_program_set_title("test_id")
     assert result is None
 
 
 def test_get_episode_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_episode_title when requests.Session.get raises exception."""
-    downloader = AudiothekDownloader()
+    """Test get_episode_title when requests.Session.get raises exception."""
+    client = AudiothekClient()
 
     def _mock_requests_get_exception(self, *args, **kwargs):
         raise requests.exceptions.RequestException("Network error")
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_exception)
 
-    result = downloader._get_episode_title("test_id")
+    result = client.get_episode_title("test_id")
     assert result is None
 
 
 def test_get_program_set_title_requests_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when requests.Session.get raises exception."""
-    downloader = AudiothekDownloader()
+    """Test get_program_set_title when requests.Session.get raises exception."""
+    client = AudiothekClient()
 
     def _mock_requests_get_exception(self, *args, **kwargs):
         raise requests.exceptions.RequestException("Network error")
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_exception)
 
-    result = downloader._get_program_set_title("test_id")
+    result = client.get_program_set_title("test_id")
     assert result is None
 
 
 def test_get_program_set_title_missing_title_in_node(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title when node exists but has no title."""
-    downloader = AudiothekDownloader()
+    """Test get_program_set_title when node exists but has no title."""
+    client = AudiothekClient()
 
     def _mock_requests_get_no_title(self, *args, **kwargs):
         class MockResponse:
@@ -98,13 +98,13 @@ def test_get_program_set_title_missing_title_in_node(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_no_title)
 
-    result = downloader._get_program_set_title("test_id")
+    result = client.get_program_set_title("test_id")
     assert result is None
 
 
 def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_episode_title with valid API response."""
-    downloader = AudiothekDownloader()
+    """Test get_episode_title with valid API response."""
+    client = AudiothekClient()
 
     def _mock_requests_get_valid(self, *args, **kwargs):
         class MockResponse:
@@ -122,13 +122,13 @@ def test_get_episode_title_with_valid_response(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
 
-    result = downloader._get_episode_title("test_id")
+    result = client.get_episode_title("test_id")
     assert result == "Test Program Title"
 
 
 def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _get_program_set_title with valid API response."""
-    downloader = AudiothekDownloader()
+    """Test get_program_set_title with valid API response."""
+    client = AudiothekClient()
 
     def _mock_requests_get_valid(self, *args, **kwargs):
         class MockResponse:
@@ -152,7 +152,7 @@ def test_get_program_set_title_with_valid_response(tmp_path: Path, monkeypatch: 
 
     monkeypatch.setattr("requests.Session.get", _mock_requests_get_valid)
 
-    result = downloader._get_program_set_title("test_id")
+    result = client.get_program_set_title("test_id")
     assert result == "Test Program Set Title"
 
 
