@@ -12,4 +12,3 @@ wheels/
 .vscode/
 .DS_Store
 /.coverage
-/.windsurf
