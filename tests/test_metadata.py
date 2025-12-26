@@ -439,3 +439,121 @@ def test_download_collection_with_program_set_id_from_url(tmp_path: Path, mock_r
     assert metadata["id"] == "ps1"
     assert "synopsis" in metadata
     assert "editorialDescription" not in metadata
+
+
+def test_should_skip_json_write_no_existing_file(tmp_path: Path) -> None:
+    """Test _should_skip_json_write when file doesn't exist."""
+    downloader = AudiothekDownloader()
+    new_data = {"id": "test", "title": "Test"}
+    file_path = tmp_path / "nonexistent.json"
+
+    result = downloader._should_skip_json_write(str(file_path), new_data)
+    assert result is False
+
+
+def test_should_skip_json_write_different_content(tmp_path: Path) -> None:
+    """Test _should_skip_json_write when content is different."""
+    downloader = AudiothekDownloader()
+
+    # Create existing file with different content
+    existing_file = tmp_path / "existing.json"
+    existing_data = {"id": "old", "title": "Old Title"}
+    existing_file.write_text(json.dumps(existing_data, indent=4))
+
+    new_data = {"id": "new", "title": "New Title"}
+
+    result = downloader._should_skip_json_write(str(existing_file), new_data)
+    assert result is False
+
+
+def test_should_skip_json_write_same_content(tmp_path: Path) -> None:
+    """Test _should_skip_json_write when content is identical."""
+    downloader = AudiothekDownloader()
+
+    # Create existing file
+    existing_file = tmp_path / "existing.json"
+    data = {"id": "test", "title": "Test", "nested": {"key": "value"}}
+    existing_file.write_text(json.dumps(data, indent=4))
+
+    # Test with same data
+    result = downloader._should_skip_json_write(str(existing_file), data)
+    assert result is True
+
+
+def test_should_skip_json_write_corrupted_file(tmp_path: Path) -> None:
+    """Test _should_skip_json_write when existing file is corrupted."""
+    downloader = AudiothekDownloader()
+
+    # Create corrupted JSON file
+    corrupted_file = tmp_path / "corrupted.json"
+    corrupted_file.write_text('{"invalid": json}')
+
+    new_data = {"id": "test", "title": "Test"}
+
+    result = downloader._should_skip_json_write(str(corrupted_file), new_data)
+    assert result is False
+
+
+def test_save_collection_data_skips_unchanged_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _save_collection_data skips writing when content is unchanged."""
+    downloader = AudiothekDownloader()
+    collection_data = {
+        "id": "test_ec",
+        "title": "Test Editorial Collection",
+        "editorialDescription": "Test editorial description"
+    }
+
+    # Create existing file with same content
+    collection_file = tmp_path / "test_ec.json"
+    collection_file.write_text(json.dumps(collection_data, indent=4))
+
+    # Get original modification time
+    original_mtime = collection_file.stat().st_mtime
+
+    with caplog.at_level("INFO"):
+        downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check that file was not modified (modification time unchanged)
+    new_mtime = collection_file.stat().st_mtime
+    assert original_mtime == new_mtime
+
+    # Check that skip message was logged
+    assert any("Skipped writing editorial collection data (content unchanged)" in r.message for r in caplog.records)
+
+
+def test_save_collection_data_writes_changed_content(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test _save_collection_data writes when content is changed."""
+    import time
+
+    downloader = AudiothekDownloader()
+
+    # Create existing file with different content
+    old_data = {"id": "test_ec", "title": "Old Title"}
+    collection_file = tmp_path / "test_ec.json"
+    collection_file.write_text(json.dumps(old_data, indent=4))
+
+    # Get original modification time
+    original_mtime = collection_file.stat().st_mtime
+
+    # Small delay to ensure different modification time
+    time.sleep(0.01)
+
+    new_data = {
+        "id": "test_ec",
+        "title": "New Title",
+        "editorialDescription": "Test editorial description"
+    }
+
+    with caplog.at_level("INFO"):
+        downloader._save_collection_data(new_data, str(tmp_path), is_editorial_collection=True)
+
+    # Check that file was modified (modification time changed)
+    new_mtime = collection_file.stat().st_mtime
+    assert new_mtime >= original_mtime  # Use >= to handle potential timing precision issues
+
+    # Check that save message was logged
+    assert any("Saved editorial collection data:" in r.message for r in caplog.records)
+
+    # Verify content was updated
+    updated_content = json.loads(collection_file.read_text())
+    assert updated_content["title"] == "New Title"

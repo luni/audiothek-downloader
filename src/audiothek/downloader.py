@@ -50,6 +50,28 @@ class AudiothekDownloader:
         """Download content using client."""
         self.client._download_to_file(url, file_path, check_status=check_status)
 
+    def _should_skip_json_write(self, file_path: str, new_data: dict[str, Any]) -> bool:
+        """Check if JSON file should be skipped because content is the same.
+
+        Args:
+            file_path: Path to the JSON file
+            new_data: New data to be written
+
+        Returns:
+            True if the write should be skipped (content is identical), False otherwise
+
+        """
+        if not os.path.exists(file_path):
+            return False
+
+        try:
+            with open(file_path) as f:
+                existing_data = json.load(f)
+            return existing_data == new_data
+        except (json.JSONDecodeError, OSError):
+            # If file is corrupted or can't be read, don't skip
+            return False
+
     def find_program_sets_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Find program sets by editorial category ID."""
         return self.client.find_program_sets_by_editorial_category_id(editorial_category_id, limit)
@@ -306,10 +328,15 @@ class AudiothekDownloader:
         collection_file_path = os.path.join(folder, f"{collection_id}.json")
 
         try:
-            with open(collection_file_path, "w") as f:
-                json.dump(collection_data, f, indent=4)
-            collection_type = "editorial collection" if is_editorial_collection else "program set"
-            self.logger.info("Saved %s data: %s", collection_type, collection_file_path)
+            # Skip writing if content is the same as existing file
+            if self._should_skip_json_write(collection_file_path, collection_data):
+                collection_type = "editorial collection" if is_editorial_collection else "program set"
+                self.logger.info("Skipped writing %s data (content unchanged): %s", collection_type, collection_file_path)
+            else:
+                with open(collection_file_path, "w") as f:
+                    json.dump(collection_data, f, indent=4)
+                collection_type = "editorial collection" if is_editorial_collection else "program set"
+                self.logger.info("Saved %s data: %s", collection_type, collection_file_path)
         except Exception as e:
             collection_type = "editorial collection" if is_editorial_collection else "program set"
             self.logger.error("Error saving %s data: %s", collection_type, e)
@@ -417,13 +444,50 @@ class AudiothekDownloader:
             },
         }
 
-        with open(meta_file_path, "w") as f:
-            json.dump(data, f, indent=4)
+        # Skip writing if content is the same as existing file
+        if self._should_skip_json_write(meta_file_path, data):
+            self.logger.info("Skipped writing episode metadata (content unchanged): %s", meta_file_path)
+        else:
+            with open(meta_file_path, "w") as f:
+                json.dump(data, f, indent=4)
 
     def _save_audio_file(self, mp3_url: str, filename: str, program_path: str, current_index: int, total_count: int) -> None:
         """Save audio file."""
         mp3_file_path = os.path.join(program_path, filename + ".mp3")
 
         self.logger.info("Download: %s of %s -> %s", current_index, total_count, mp3_file_path)
-        if not os.path.exists(mp3_file_path):
+
+        # Check if file exists and is complete
+        should_download = True
+        if os.path.exists(mp3_file_path):
+            # Get expected content length via HEAD request
+            expected_length = self.client._get_content_length(mp3_url)
+            if expected_length:
+                # Get current file size
+                current_size = os.path.getsize(mp3_file_path)
+                if current_size == expected_length:
+                    self.logger.info("File already exists and is complete: %s", mp3_file_path)
+                    should_download = False
+                else:
+                    self.logger.info(
+                        "File exists but is incomplete (%s/%s bytes), will backup and re-download: %s", current_size, expected_length, mp3_file_path
+                    )
+                    # Rename old file to .bak
+                    backup_path = mp3_file_path + ".bak"
+                    try:
+                        os.rename(mp3_file_path, backup_path)
+                        self.logger.info("Backed up incomplete file to: %s", backup_path)
+                    except Exception as e:
+                        self.logger.error("Failed to backup file: %s", e)
+            else:
+                self.logger.info("Could not determine content length, will backup existing file: %s", mp3_file_path)
+                # Rename old file to .bak
+                backup_path = mp3_file_path + ".bak"
+                try:
+                    os.rename(mp3_file_path, backup_path)
+                    self.logger.info("Backed up existing file to: %s", backup_path)
+                except Exception as e:
+                    self.logger.error("Failed to backup file: %s", e)
+
+        if should_download:
             self._download_to_file(mp3_url, mp3_file_path)

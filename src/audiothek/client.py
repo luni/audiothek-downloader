@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
@@ -45,6 +44,15 @@ class AudiothekClient:
             response.raise_for_status()
         with open(file_path, "wb") as f:
             f.write(response.content)
+
+    def _get_content_length(self, url: str) -> int | None:
+        """Get content length from URL using HEAD request."""
+        try:
+            response = self._session.head(url, timeout=REQUEST_TIMEOUT)
+            response.raise_for_status()
+            return int(response.headers.get("content-length", 0))
+        except Exception:
+            return None
 
     def find_program_sets_by_editorial_category_id(self, editorial_category_id: str, limit: int = 200) -> list[dict[str, Any]]:
         """Find program sets by editorial category ID."""
