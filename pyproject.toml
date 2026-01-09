@@ -61,6 +61,8 @@ addopts = [
     "--import-mode=importlib",
     "--cov=audiothek",
     "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-report=html",
     "--cov-fail-under=85",
 ]
 pythonpath = ["."]

@@ -2,6 +2,8 @@ name: Python Code Checks
 
 permissions:
   contents: read
+  checks: write
+  pull-requests: write
 
 on:
   pull_request:
@@ -64,3 +66,11 @@ jobs:
       - name: Run pytest (Test Suite)
         run: |
           uv run make test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml,./htmlcov/
+          fail_ci_if_error: false
+          verbose: true
