@@ -418,7 +418,7 @@ def test_save_collection_data_skips_existing_image(tmp_path: Path, monkeypatch: 
 def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: object) -> None:
     """Test downloading editorial collection using URL with editorial collection URN."""
     downloader = AudiothekDownloader()
-    downloader.download_from_url("https://www.ardaudiothek.de/sammlung/test/urn:ard:page:ec1/", str(tmp_path))
+    downloader.download_from_url("https://www.ardsounds.de/sammlung/test/urn:ard:page:ec1/", str(tmp_path))
 
     # Check that editorial collection metadata file was created in the series folder
     series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
@@ -434,7 +434,7 @@ def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Pat
 def test_download_collection_with_program_set_id_from_url(tmp_path: Path, mock_requests_get: object, graphql_mock: object) -> None:
     """Test downloading program set using URL with program set URN."""
     downloader = AudiothekDownloader()
-    downloader.download_from_url("https://www.ardaudiothek.de/sendung/test/urn:ard:show:ps1/", str(tmp_path))
+    downloader.download_from_url("https://www.ardsounds.de/sendung/test/urn:ard:show:ps1/", str(tmp_path))
 
     # Check that program set metadata file was created in the series folder
     series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title

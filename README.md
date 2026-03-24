@@ -3,7 +3,7 @@
 A powerful Python tool for downloading content from the ARD Audiothek platform. Download entire programs, editorial collections, or individual episodes with metadata, cover art, and audio files in the highest available quality.
 
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MPL--2.0-green.svg)](LICENSE)
 
 ## Features
 
@@ -56,10 +56,10 @@ uv pip install -e .
 audiothek --help
 
 # Download a program (all episodes)
-audiothek --url 'https://www.ardaudiothek.de/sendung/example-program/12345678/'
+audiothek --url 'https://www.ardsounds.de/sendung/example-program/12345678/'
 
 # Download a single episode
-audiothek --url 'https://www.ardaudiothek.de/episode/example/urn:ard:episode:1234567890abcdef/'
+audiothek --url 'https://www.ardsounds.de/episode/example/urn:ard:episode:1234567890abcdef/'
 
 # Download using direct ID
 audiothek --id 'urn:ard:episode:1234567890abcdef'
@@ -90,7 +90,7 @@ audiothek --update-folders
 ### Custom Output Directory
 
 ```bash
-audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --folder '/path/to/archive'
+audiothek --url 'https://www.ardsounds.de/sendung/example/12345678/' --folder '/path/to/archive'
 ```
 
 ### Using a Proxy
@@ -126,7 +126,7 @@ Example:
 
 ```bash
 # Store cache inside the project directory
-audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --cache-dir './.cache/audiothek'
+audiothek --url 'https://www.ardsounds.de/sendung/example/12345678/' --cache-dir './.cache/audiothek'
 
 # Temporarily disable caching
 AUDIOTHEK_DISABLE_CACHE=1 audiothek --id 'urn:ard:episode:1234567890abcdef'
@@ -138,7 +138,7 @@ Episode downloads run concurrently to improve throughput. Control the concurrenc
 
 ```bash
 # Use 8 worker threads for faster downloads on fast connections
-audiothek --url 'https://www.ardaudiothek.de/sendung/example/12345678/' --max-workers 8
+audiothek --url 'https://www.ardsounds.de/sendung/example/12345678/' --max-workers 8
 ```
 
 Using more workers increases CPU/network usage. If you encounter rate limits or run on low-powered hardware, reduce the value (minimum `1`).
@@ -152,7 +152,7 @@ from audiothek import AudiothekDownloader, AudiothekClient
 downloader = AudiothekDownloader(base_folder="/path/to/output", proxy=None)
 
 # Download content by URL
-downloader.download_from_url("https://www.ardaudiothek.de/sendung/example/12345678/")
+downloader.download_from_url("https://www.ardsounds.de/sendung/example/12345678/")
 
 # Download content by ID
 downloader.download_from_id("urn:ard:episode:1234567890abcdef")

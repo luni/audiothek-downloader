@@ -355,7 +355,7 @@ class AudiothekDownloader:
                     os.remove(file_path)
                     self.logger.info("Removed lower quality file: %s", file_path)
                     removed_count += 1
-                except Exception as e:
+                except OSError as e:
                     self.logger.error("Failed to remove file %s: %s", file_path, e)
                     error_count += 1
 
@@ -374,11 +374,19 @@ class AudiothekDownloader:
         try:
             audio = File(file_path)
             if audio is not None:
+                bitrate_value: int | None = None
                 if hasattr(audio.info, "bitrate"):
-                    return audio.info.bitrate
+                    bitrate_value = audio.info.bitrate
                 # For some formats, bitrate might be in different location
-                if hasattr(audio, "info") and hasattr(audio.info, "bitrate"):
-                    return audio.info.bitrate
+                elif hasattr(audio, "info") and hasattr(audio.info, "bitrate"):
+                    bitrate_value = audio.info.bitrate
+
+                if bitrate_value is None:
+                    return None
+
+                # Mutagen usually exposes bitrate in bps. Normalize to kbps to match
+                # quality thresholds used across the downloader (e.g. 96/128 kbps).
+                return bitrate_value // 1000 if bitrate_value > 1000 else bitrate_value
         except Exception as e:
             self.logger.debug("Could not read bitrate from %s: %s", file_path, e)
         return None
@@ -839,10 +847,9 @@ class AudiothekDownloader:
             self.logger.error("No audio URLs provided")
             return False
 
-        # Use the first (highest priority) URL
+        # Use the first (highest priority) URL and retry remaining candidates in order.
         preferred_url = audio_urls[0]
-        # Use the second URL as fallback if available, otherwise use the first
-        fallback_url = audio_urls[1] if len(audio_urls) > 1 else audio_urls[0]
+        fallback_urls = audio_urls[1:]
         # Determine file extension based on URL format
         file_extension = self._get_audio_file_extension(preferred_url)
         audio_file_path = os.path.join(program_path, filename + file_extension)
@@ -893,7 +900,11 @@ class AudiothekDownloader:
                         return False
 
             if should_download:
-                download_success = self.client._download_audio_to_file(preferred_url, audio_file_path, fallback_url)
+                download_success = self.client._download_audio_to_file(
+                    preferred_url,
+                    audio_file_path,
+                    fallback_urls=fallback_urls,
+                )
                 if download_success:
                     # Set file modification time to publish date if available
                     if publish_date:
@@ -906,7 +917,7 @@ class AudiothekDownloader:
                     try:
                         os.remove(audio_file_path)
                         self.logger.info("Removed invalid audio file: %s", audio_file_path)
-                    except Exception as e:
+                    except OSError as e:
                         self.logger.error("Failed to remove invalid audio file: %s", e)
 
                 # Restore backup file if it exists

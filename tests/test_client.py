@@ -82,28 +82,28 @@ class TestAudiothekClient:
     def test_parse_url_with_urn_episode(self) -> None:
         """Test parsing URL with episode URN."""
         client = AudiothekClient()
-        result = client.parse_url("https://www.ardaudiothek.de/episode/test-show/test-episode/urn:ard:episode:test123")
+        result = client.parse_url("https://www.ardsounds.de/episode/test-show/test-episode/urn:ard:episode:test123")
 
         assert result == ResourceInfo(resource_type="episode", resource_id="urn:ard:episode:test123")
 
     def test_parse_url_with_urn_collection(self) -> None:
         """Test parsing URL with collection URN."""
         client = AudiothekClient()
-        result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/collection/urn:ard:page:test123")
+        result = AudiothekClient.parse_url("https://www.ardsounds.de/collection/urn:ard:page:test123")
 
         assert result == ResourceInfo(resource_type="collection", resource_id="urn:ard:page:test123")
 
     def test_parse_url_with_urn_program(self) -> None:
         """Test parsing URL with program URN."""
         client = AudiothekClient()
-        result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/program/urn:ard:show:test123")
+        result = AudiothekClient.parse_url("https://www.ardsounds.de/program/urn:ard:show:test123")
 
         assert result == ResourceInfo(resource_type="program", resource_id="urn:ard:show:test123")
 
     def test_parse_url_with_numeric_id(self) -> None:
         """Test parsing URL with numeric ID."""
         client = AudiothekClient()
-        result = AudiothekClient.parse_url("https://audiothek.ardaudiothek.de/program/123456")
+        result = AudiothekClient.parse_url("https://www.ardsounds.de/program/123456")
 
         assert result == ResourceInfo(resource_type="program", resource_id="123456")
 
@@ -409,6 +409,42 @@ class TestAudiothekClient:
 
         assert result == b"valid audio content but small"
 
+    @patch("audiothek.client.time.sleep")
+    @patch("requests.Session.get")
+    def test_fetch_and_validate_audio_retries_incomplete_read_then_succeeds(self, mock_get: Mock, mock_sleep: Mock) -> None:
+        """Retry same URL on transient incomplete-read errors."""
+        mock_response = Mock()
+        mock_response.content = b"valid audio content" * 1000
+        mock_response.raise_for_status.return_value = None
+
+        incomplete_error = requests.ConnectionError(
+            "Connection broken: IncompleteRead(16777216 bytes read, 52616056 more expected)"
+        )
+        mock_get.side_effect = [incomplete_error, mock_response]
+
+        client = AudiothekClient()
+        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+
+        assert result == b"valid audio content" * 1000
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once_with(0.5)
+
+    @patch("audiothek.client.time.sleep")
+    @patch("requests.Session.get")
+    def test_fetch_and_validate_audio_incomplete_read_exhausted(self, mock_get: Mock, mock_sleep: Mock) -> None:
+        """Raise DownloadError after exhausting retry attempts for incomplete reads."""
+        incomplete_error = requests.ConnectionError(
+            "Connection broken: IncompleteRead(16777216 bytes read, 52616056 more expected)"
+        )
+        mock_get.side_effect = [incomplete_error, incomplete_error, incomplete_error]
+
+        client = AudiothekClient()
+        with pytest.raises(DownloadError):
+            client._fetch_and_validate_audio("http://example.com/audio.mp3")
+
+        assert mock_get.call_count == 3
+        assert mock_sleep.call_count == 2
+
     @patch.object(AudiothekClient, '_fetch_and_validate_audio')
     @patch('builtins.open', create=True)
     def test_download_audio_to_file_success(self, mock_open: Mock, mock_fetch: Mock) -> None:
@@ -479,3 +515,43 @@ class TestAudiothekClient:
             assert result is True
             mock_fetch.assert_called_once_with("http://example.com/audio.mp3")
             mock_file.write.assert_called_once_with(b"audio content")
+
+    @patch.object(AudiothekClient, "_fetch_and_validate_audio")
+    @patch("builtins.open", create=True)
+    def test_download_audio_to_file_retries_all_fallback_urls(self, mock_open: Mock, mock_fetch: Mock) -> None:
+        """Test audio download retries through ordered fallback URL list."""
+        mock_fetch.side_effect = [None, None, b"third source content"]
+        mock_file = Mock()
+        mock_open.return_value.__enter__.return_value = mock_file
+
+        client = AudiothekClient()
+        result = client._download_audio_to_file(
+            "http://example.com/audio.mp3",
+            "/tmp/audio.mp3",
+            fallback_urls=[
+                "http://example.com/fallback-1.mp3",
+                "http://example.com/fallback-2.mp3",
+            ],
+        )
+
+        assert result is True
+        assert mock_fetch.call_count == 3
+        mock_fetch.assert_any_call("http://example.com/audio.mp3")
+        mock_fetch.assert_any_call("http://example.com/fallback-1.mp3")
+        mock_fetch.assert_any_call("http://example.com/fallback-2.mp3")
+        mock_file.write.assert_called_once_with(b"third source content")
+
+    @patch.object(AudiothekClient, "_fetch_and_validate_audio")
+    def test_download_audio_to_file_all_candidates_fail(self, mock_fetch: Mock) -> None:
+        """Test audio download returns False when all URL candidates fail."""
+        mock_fetch.return_value = None
+
+        client = AudiothekClient()
+        result = client._download_audio_to_file(
+            "http://example.com/audio.mp3",
+            "/tmp/audio.mp3",
+            fallback_urls=["http://example.com/fallback-1.mp3", "http://example.com/fallback-2.mp3"],
+        )
+
+        assert result is False
+        assert mock_fetch.call_count == 3

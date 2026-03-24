@@ -53,7 +53,7 @@ def test_main_with_id_program(tmp_path: Path, mock_requests_get: object, graphql
 
 def test_main_with_valid_url(tmp_path: Path, mock_requests_get: object) -> None:
     # Test the URL path in main function
-    request = DownloadRequest(url="https://www.ardaudiothek.de/folge/x/urn:ard:episode:test/", folder=str(tmp_path))
+    request = DownloadRequest(url="https://www.ardsounds.de/folge/x/urn:ard:episode:test/", folder=str(tmp_path))
     _process_request(request)
 
     # written under programSet id and title from mock: "ps1 Prog"
@@ -111,7 +111,7 @@ def test_argument_parser_setup() -> None:
         "-u",
         type=str,
         default="",
-        help="Insert audiothek url (e.g. https://www.ardaudiothek.de/sendung/kein-mucks-der-krimi-podcast-mit-bastian-pastewka/urn:ard:show:e01e22ff9344b2a4/)",
+        help="Insert audiothek url (e.g. https://www.ardsounds.de/sendung/kein-mucks-der-krimi-podcast-mit-bastian-pastewka/urn:ard:show:e01e22ff9344b2a4/)",
     )
     group.add_argument(
         "--id",
@@ -232,7 +232,7 @@ def test_process_request_passes_cache_dir(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr("audiothek.__main__.AudiothekDownloader", DummyDownloader)
 
     request = DownloadRequest(
-        url="https://www.ardaudiothek.de/episode/foo/urn:ard:episode:test/",
+        url="https://www.ardsounds.de/episode/foo/urn:ard:episode:test/",
         folder=str(tmp_path),
         cache_dir="/tmp/cache-dir",
     )

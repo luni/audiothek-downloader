@@ -34,7 +34,7 @@ def parallel_process(
     if logger is None:
         logger = logging.getLogger(__name__)
 
-    results = []
+    indexed_results: dict[int, tuple[bool, T | None, Exception | None]] = {}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks
@@ -45,17 +45,17 @@ def parallel_process(
             index = future_to_index[future]
             try:
                 success, result, exception = future.result()
-                results.append((success, result, exception))
+                indexed_results[index] = (success, result, exception)
                 if success:
                     logger.debug("Successfully processed item %s of %s", index + 1, len(items))
                 else:
                     logger.warning("Failed to process item %s of %s: %s", index + 1, len(items), exception)
             except Exception as e:
                 logger.error("Error getting result for item %s: %s", index + 1, e)
-                results.append((False, None, e))
+                indexed_results[index] = (False, None, e)
 
     # Sort results by original index
-    return results
+    return [indexed_results[index] for index in range(len(items))]
 
 
 def _safe_process_item(

@@ -150,6 +150,33 @@ class TestParallelProcess:
         assert result[0][1] is None  # result
         assert isinstance(result[0][2], RuntimeError)  # exception
 
+    @patch("audiothek.parallel.concurrent.futures.ThreadPoolExecutor")
+    @patch("audiothek.parallel.concurrent.futures.as_completed")
+    def test_parallel_process_returns_results_in_input_order(self, mock_as_completed: Mock, mock_executor_class: Mock) -> None:
+        """Test parallel_process normalizes output order to input index order."""
+        future0 = Mock()
+        future1 = Mock()
+        future2 = Mock()
+
+        # Return completion in reverse order to simulate real-world async completion.
+        mock_as_completed.return_value = [future2, future1, future0]
+
+        def _submit(*args, **kwargs):
+            index = kwargs.get("args", [None, None, None, 0])[3] if kwargs else args[3]
+            return [future0, future1, future2][index]
+
+        mock_executor = Mock()
+        mock_executor.submit.side_effect = _submit
+        mock_executor_class.return_value.__enter__.return_value = mock_executor
+        mock_executor_class.return_value.__exit__.return_value = None
+
+        future0.result.return_value = (True, "result_0", None)
+        future1.result.return_value = (True, "result_1", None)
+        future2.result.return_value = (True, "result_2", None)
+
+        result = parallel_process(["a", "b", "c"], lambda x, i, t: x)
+        assert [item[1] for item in result] == ["result_0", "result_1", "result_2"]
+
 
 class TestSafeProcessItem:
     """Test cases for _safe_process_item function."""

@@ -705,7 +705,12 @@ def test_save_audio_file_handles_deleted_file(tmp_path: Path, monkeypatch: pytes
     """Test that _save_audio_file handles deleted/unavailable audio files correctly."""
     downloader = AudiothekDownloader()
 
-    def _mock_download_audio_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
+    def _mock_download_audio_file(
+        url: str,
+        file_path: str,
+        fallback_url: str | None = None,
+        fallback_urls: list[str] | None = None,
+    ) -> bool:
         return False  # Simulate failed download
 
     monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
@@ -734,7 +739,12 @@ def test_save_audio_file_restores_backup_on_download_failure(tmp_path: Path, mon
     """Test that _save_audio_file restores backup file when download fails."""
     downloader = AudiothekDownloader()
 
-    def _mock_download_audio_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
+    def _mock_download_audio_file(
+        url: str,
+        file_path: str,
+        fallback_url: str | None = None,
+        fallback_urls: list[str] | None = None,
+    ) -> bool:
         return False  # Simulate failed download
 
     def _mock_check_file_availability(url: str) -> tuple[bool, int | None]:
@@ -886,6 +896,50 @@ def test_get_audio_quality_invalid_file(tmp_path: Path) -> None:
 
     quality = downloader._get_audio_quality(str(invalid_file))
     assert quality is None
+
+
+def test_get_audio_quality_normalizes_bps_to_kbps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_audio_quality normalizes mutagen bitrate from bps to kbps."""
+    downloader = AudiothekDownloader()
+    audio_file = tmp_path / "audio.mp3"
+    audio_file.write_bytes(b"dummy")
+
+    class _MockAudioInfo:
+        bitrate = 128000
+
+    class _MockAudio:
+        info = _MockAudioInfo()
+
+    monkeypatch.setattr("audiothek.downloader.File", lambda _path: _MockAudio())
+
+    quality = downloader._get_audio_quality(str(audio_file))
+    assert quality == 128
+
+
+def test_compare_and_remove_files_handles_bps_bitrate_values(tmp_path: Path) -> None:
+    """Test quality cleanup treats bps-returned values as kbps-equivalent thresholds."""
+    downloader = AudiothekDownloader()
+
+    mp3_file = tmp_path / "episode.mp3"
+    m4a_file = tmp_path / "episode.m4a"
+    mp3_file.write_bytes(b"fake mp3")
+    m4a_file.write_bytes(b"fake m4a")
+
+    # Simulate mutagen bitrates in bps; cleanup compares normalized kbps values.
+    def mock_get_quality(file_path: str) -> int | None:
+        if file_path.endswith(".mp3"):
+            return 128
+        if file_path.endswith(".m4a"):
+            return 96
+        return None
+
+    downloader._get_audio_quality = mock_get_quality
+    files = {".mp3": str(mp3_file), ".m4a": str(m4a_file)}
+
+    result = downloader._compare_and_remove_files("episode", files, str(tmp_path), dry_run=False)
+    assert result["removed"] == 1
+    assert not mp3_file.exists()
+    assert m4a_file.exists()
 
 
 def test_remove_lower_quality_files_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

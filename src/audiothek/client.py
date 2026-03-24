@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -39,6 +40,21 @@ class AudiothekClient:
         if proxy:
             proxies = {"http": proxy, "https": proxy}
             self._session.proxies = proxies
+
+    @staticmethod
+    def _is_incomplete_read_error(error: BaseException) -> bool:
+        """Return True when an exception chain indicates an incomplete read."""
+        if "IncompleteRead" in str(error):
+            return True
+
+        current: BaseException | None = error
+        visited: set[int] = set()
+        while current is not None and id(current) not in visited:
+            visited.add(id(current))
+            if current.__class__.__name__ == "IncompleteRead":
+                return True
+            current = current.__cause__ or current.__context__
+        return False
 
     def _graphql_get(self, query: str, variables: dict[str, Any], query_name: str = "") -> dict[str, Any]:
         """Execute GraphQL query.
@@ -122,15 +138,36 @@ class AudiothekClient:
             DownloadError: For HTTP errors other than 404
 
         """
-        try:
-            response = self._session.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                self.logger.warning("Audio file not found (404): %s", url)
-                return None
-            self.logger.error("HTTP error downloading audio: %s - %s", url, e)
-            raise DownloadError(url, e.response.status_code, str(e)) from e
+        max_attempts = 3
+        response = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = self._session.get(url, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                break
+            except requests.HTTPError as e:
+                if e.response.status_code == 404:
+                    self.logger.warning("Audio file not found (404): %s", url)
+                    return None
+                self.logger.error("HTTP error downloading audio: %s - %s", url, e)
+                raise DownloadError(url, e.response.status_code, str(e)) from e
+            except requests.RequestException as e:
+                is_retryable = self._is_incomplete_read_error(e)
+                if is_retryable and attempt < max_attempts:
+                    backoff_seconds = 0.5 * attempt
+                    self.logger.warning(
+                        "Incomplete read while downloading audio (attempt %s/%s), retrying in %.1fs: %s",
+                        attempt,
+                        max_attempts,
+                        backoff_seconds,
+                        url,
+                    )
+                    time.sleep(backoff_seconds)
+                    continue
+                raise DownloadError(url, None, str(e)) from e
+
+        if response is None:
+            return None
 
         # Check if content is likely an error response rather than audio
         content = response.content
@@ -142,35 +179,57 @@ class AudiothekClient:
 
         return content
 
-    def _download_audio_to_file(self, url: str, file_path: str, fallback_url: str | None = None) -> bool:
+    def _download_audio_to_file(
+        self,
+        url: str,
+        file_path: str,
+        fallback_url: str | None = None,
+        fallback_urls: list[str] | None = None,
+    ) -> bool:
         """Download audio content from URL to file with validation.
 
         Args:
             url: The URL to download from
             file_path: The local file path to save to
-            fallback_url: Optional fallback URL to try if primary URL fails with 404
+            fallback_url: Optional single fallback URL (backward-compatible)
+            fallback_urls: Optional list of additional fallback URLs to try in order
 
         Returns:
             True if download was successful, False if file was not found or invalid
 
         """
-        content = self._fetch_and_validate_audio(url)
+        ordered_urls: list[str] = [url]
+        for candidate in [fallback_url, *(fallback_urls or [])]:
+            if candidate and candidate not in ordered_urls:
+                ordered_urls.append(candidate)
 
-        if content is None:
-            if fallback_url and fallback_url != url:
-                self.logger.info("Trying fallback URL: %s", fallback_url)
-                try:
-                    content = self._fetch_and_validate_audio(fallback_url)
-                    if content:
-                        self.logger.info("Successfully downloaded from fallback URL: %s", fallback_url)
-                    else:
-                        self.logger.warning("Fallback URL also appears to be unavailable: %s", fallback_url)
-                except Exception as e:
-                    self.logger.error("Error downloading fallback audio: %s - %s", fallback_url, e)
-                    content = None
+        content: bytes | None = None
+        successful_url: str | None = None
 
-        if content is None:
+        for index, candidate_url in enumerate(ordered_urls):
+            if index > 0:
+                self.logger.info("Trying fallback URL: %s", candidate_url)
+            try:
+                content = self._fetch_and_validate_audio(candidate_url)
+                if content is None:
+                    if index > 0:
+                        self.logger.warning("Fallback URL also appears to be unavailable: %s", candidate_url)
+                    continue
+                successful_url = candidate_url
+                break
+            except DownloadError as e:
+                if index == len(ordered_urls) - 1:
+                    self.logger.error("Error downloading audio from %s: %s", candidate_url, e)
+                else:
+                    self.logger.error("Error downloading fallback audio: %s - %s", candidate_url, e)
+            except Exception as e:
+                self.logger.error("Unexpected error downloading audio from %s: %s", candidate_url, e)
+
+        if content is None or successful_url is None:
             return False
+
+        if successful_url != url:
+            self.logger.info("Successfully downloaded from fallback URL: %s", successful_url)
 
         # Save the valid audio content
         try:

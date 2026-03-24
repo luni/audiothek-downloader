@@ -36,7 +36,7 @@ def main() -> None:
         "-u",
         type=str,
         default="",
-        help="Insert audiothek url (e.g. https://www.ardaudiothek.de/sendung/kein-mucks-der-krimi-podcast-mit-bastian-pastewka/urn:ard:show:e01e22ff9344b2a4/)",
+        help="Insert audiothek url (e.g. https://www.ardsounds.de/sendung/kein-mucks-der-krimi-podcast-mit-bastian-pastewka/urn:ard:show:e01e22ff9344b2a4/)",
     )
     group.add_argument(
         "--id",

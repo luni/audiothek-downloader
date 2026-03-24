@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+from importlib import resources
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -43,11 +44,16 @@ def load_graphql_query(filename: str) -> str:
         The GraphQL query string
 
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    graphql_dir = os.path.join(base_dir, "graphql")
-    query_path = os.path.join(graphql_dir, filename)
-    with open(query_path) as f:
-        return f.read()
+    # Prefer package resources so installed wheels/sdists work reliably.
+    try:
+        return resources.files("audiothek").joinpath("graphql").joinpath(filename).read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError):
+        # Fallback for local source-tree execution.
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        graphql_dir = os.path.join(base_dir, "graphql")
+        query_path = os.path.join(graphql_dir, filename)
+        with open(query_path, encoding="utf-8") as f:
+            return f.read()
 
 
 def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logging.Logger) -> None:
