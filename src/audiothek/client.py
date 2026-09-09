@@ -506,6 +506,8 @@ class AudiothekClient:
             ResourceInfo object with resource type and ID, or None if not recognized
 
         """
+        resource_id = resource_id.strip()
+
         if resource_id.startswith("urn:ard:episode:"):
             return ResourceInfo("episode", resource_id)
         if resource_id.startswith("urn:ard:page:"):
@@ -534,6 +536,8 @@ class AudiothekClient:
             ResourceInfo object with resource type and ID, or None if not recognized
 
         """
+        url = url.strip()
+
         # Validate URL
         try:
             parsed_url = urlparse(url)

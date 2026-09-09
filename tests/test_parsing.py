@@ -64,3 +64,12 @@ def test_determine_resource_type_from_id_alphanumeric() -> None:
 
 def test_determine_resource_type_from_id_none() -> None:
     assert AudiothekClient.determine_resource_type_from_id("invalid_id") is None
+
+
+def test_determine_resource_type_strips_whitespace() -> None:
+    assert AudiothekClient.determine_resource_type_from_id("  12345  ") == ResourceInfo(resource_type="program", resource_id="12345")
+
+
+def test_parse_url_strips_whitespace() -> None:
+    url = "  https://www.ardsounds.de/sendung/x/12345/  "
+    assert AudiothekClient.parse_url(url) == ResourceInfo(resource_type="program", resource_id="12345")
