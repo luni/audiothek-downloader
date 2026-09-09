@@ -274,6 +274,21 @@ def test_save_collection_data_program_set(tmp_path: Path, mock_requests_get: obj
     assert cover_image_file.exists()
 
 
+def test_save_collection_data_with_zero_id(tmp_path: Path) -> None:
+    """A collection id of 0 must be preserved, not replaced by the fallback."""
+    downloader = AudiothekDownloader()
+
+    collection_data = {
+        "id": 0,
+        "title": "Zero Collection",
+    }
+
+    downloader._save_collection_data(collection_data, str(tmp_path), is_editorial_collection=True)
+
+    # JSON and image files should use 0 as the base name
+    assert (tmp_path / "0.json").exists()
+
+
 def test_save_collection_data_without_id_uses_fallback(tmp_path: Path) -> None:
     """Test _save_collection_data uses fallback ID when no ID is provided."""
     downloader = AudiothekDownloader()

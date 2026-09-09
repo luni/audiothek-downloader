@@ -475,12 +475,22 @@ class AudiothekDownloader:
         if is_editorial_collection:
             # Editorial collection nodes carry their own programSet; use the
             # collection's top-level identity for the folder name.
-            programset_id = collection_data.get("id") or program_set.get("id") or "collection"
+            raw_programset_id = collection_data.get("id")
+            if raw_programset_id is None or raw_programset_id == "":
+                raw_programset_id = program_set.get("id")
+            if raw_programset_id is None or raw_programset_id == "":
+                raw_programset_id = "collection"
+            programset_id = raw_programset_id
             programset_title = collection_data.get("title") or program_set.get("title") or ""
         else:
             # Program set episodes share the same programSet; using the node
             # programSet keeps collection metadata in the same folder as episodes.
-            programset_id = program_set.get("id") or collection_data.get("id") or "program_set"
+            raw_programset_id = program_set.get("id")
+            if raw_programset_id is None or raw_programset_id == "":
+                raw_programset_id = collection_data.get("id")
+            if raw_programset_id is None or raw_programset_id == "":
+                raw_programset_id = "program_set"
+            programset_id = raw_programset_id
             programset_title = program_set.get("title") or collection_data.get("title") or ""
 
         folder_name = self._program_folder_name(str(programset_id), str(programset_title))
@@ -499,7 +509,10 @@ class AudiothekDownloader:
             publish_date: Publish date to set for file modification time
 
         """
-        collection_id = collection_data.get("id") or ("collection" if is_editorial_collection else "program_set")
+        raw_collection_id = collection_data.get("id")
+        if raw_collection_id is None or raw_collection_id == "":
+            raw_collection_id = "collection" if is_editorial_collection else "program_set"
+        collection_id = raw_collection_id
 
         # Create the output folder if it doesn't exist
         if not ensure_directory_exists(folder, self.logger):
