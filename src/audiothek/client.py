@@ -355,7 +355,7 @@ class AudiothekClient:
         audios = node.get("audios") or []
         for audio in audios:
             if isinstance(audio, dict):
-                if audio.get("downloadUrl"):
+                if audio.get("downloadUrl") and audio.get("allowDownload") is not False:
                     audio_urls.append(audio["downloadUrl"])
                 if audio.get("url"):
                     audio_urls.append(audio["url"])

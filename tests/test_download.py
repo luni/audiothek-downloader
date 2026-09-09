@@ -688,6 +688,22 @@ def test_extract_audio_url_chooses_downloadUrl_when_same_size(tmp_path: Path, mo
     assert audio_urls[1] == "https://example.com/audio.mp4"
 
 
+def test_extract_audio_url_skips_disallowed_download_url() -> None:
+    """When allowDownload is False, only the streaming URL is used."""
+    downloader = AudiothekDownloader()
+
+    node = {
+        "audios": [{
+            "downloadUrl": "https://example.com/audio.mp3",
+            "url": "https://example.com/audio.m4a",
+            "allowDownload": False,
+        }]
+    }
+
+    audio_urls = downloader._extract_audio_url(node)
+    assert audio_urls == ["https://example.com/audio.m4a"]
+
+
 def test_get_audio_file_extension() -> None:
     """Test file extension detection for different audio formats."""
     downloader = AudiothekDownloader()

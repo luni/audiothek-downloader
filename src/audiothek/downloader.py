@@ -692,7 +692,10 @@ class AudiothekDownloader:
             download_url = audio.get("downloadUrl")
             streaming_url = audio.get("url")
 
-            if download_url:
+            # Respect the API's allowDownload flag; only use the download URL
+            # when the content is explicitly marked as downloadable or the
+            # field is missing/None (API default).
+            if download_url and audio.get("allowDownload") is not False:
                 download_urls.append(download_url)
             if streaming_url:
                 streaming_urls.append(streaming_url)
