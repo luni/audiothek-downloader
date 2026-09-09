@@ -597,7 +597,8 @@ class AudiothekDownloader:
 
         """
         try:
-            node_id = str(node.get("id") or index)
+            raw_node_id = node.get("id")
+            node_id = str(raw_node_id if raw_node_id is not None else index)
             title = node.get("title") or node_id
 
             # get title from infos
@@ -614,7 +615,8 @@ class AudiothekDownloader:
 
             # Get program information
             program_set = node.get("programSet") or {}
-            programset_id = program_set.get("id") or "episode"
+            raw_programset_id = program_set.get("id")
+            programset_id = raw_programset_id if raw_programset_id is not None and raw_programset_id != "" else "episode"
             programset_title = program_set.get("title") or ""
 
             # Create folder name with ID and title: "123456 Show Title"

@@ -477,6 +477,32 @@ def test_save_nodes_without_programset_title(tmp_path: Path, monkeypatch: pytest
     assert (tmp_path / "ps1").exists()
 
 
+def test_save_nodes_preserves_numeric_zero_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A node or programSet ID of 0 must not be replaced by the fallback."""
+    downloader = AudiothekDownloader()
+
+    node = {
+        "id": 0,
+        "title": "Zero Episode",
+        "audios": [{"downloadUrl": "https://example.com/audio.mp3"}],
+        "programSet": {"id": 0, "title": "Zero Program"},
+    }
+
+    def _mock_requests_get(self, *args, **kwargs):
+        class MockResponse:
+            content = b"audio data"
+            def raise_for_status(self):
+                pass
+        return MockResponse()
+
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get)
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # Folder and filename should both use the string "0", not fallbacks
+    assert (tmp_path / "0 Zero Program").exists()
+
+
 def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test download_from_id uses base_folder when no folder provided."""
     downloader = AudiothekDownloader("/default/path")
