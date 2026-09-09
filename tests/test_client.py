@@ -613,3 +613,29 @@ class TestAudiothekClient:
 
         assert result is False
         assert mock_fetch.call_count == 3
+
+
+@patch.object(AudiothekClient, "_graphql_get")
+@patch("audiothek.client.load_graphql_query")
+def test_get_episode_data_handles_null_data(mock_load_query: Mock, mock_graphql_get: Mock) -> None:
+    """A GraphQL response with data: null must not crash get_episode_data."""
+    mock_load_query.return_value = "query"
+    mock_graphql_get.return_value = {"data": None}
+
+    client = AudiothekClient()
+    result = client.get_episode_data("ep1")
+
+    assert result is None
+
+
+@patch.object(AudiothekClient, "_graphql_get")
+@patch("audiothek.client.load_graphql_query")
+def test_get_program_set_data_handles_null_data(mock_load_query: Mock, mock_graphql_get: Mock) -> None:
+    """A GraphQL response with data: null must not crash get_program_set_data."""
+    mock_load_query.return_value = "query"
+    mock_graphql_get.return_value = {"data": None}
+
+    client = AudiothekClient()
+    result = client.get_program_set_data("ps1")
+
+    assert result is None

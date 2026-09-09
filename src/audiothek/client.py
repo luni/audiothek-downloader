@@ -328,7 +328,7 @@ class AudiothekClient:
         query = load_graphql_query("EpisodeQuery.graphql")
         response_json = self._graphql_get(query, {"id": episode_id}, "EpisodeQuery")
 
-        node = response_json.get("data", {}).get("result")
+        node = (response_json.get("data") or {}).get("result")
         return node
 
     def get_episode_metadata(self, episode_id: str) -> EpisodeMetadata | None:
@@ -422,7 +422,7 @@ class AudiothekClient:
         query = load_graphql_query("ProgramSetEpisodesQuery.graphql")
         response_json = self._graphql_get(query, {"id": program_id, "offset": offset, "count": count}, "ProgramSetEpisodesQuery")
 
-        result = response_json.get("data", {}).get("result", {})
+        result = (response_json.get("data") or {}).get("result", {})
         return result if result else None
 
     def get_program_set_title(self, program_id: str) -> str | None:
@@ -590,7 +590,7 @@ class AudiothekClient:
             variables = {"id": program_id, "offset": offset, "count": min(count, remaining)}
             response_json = self._graphql_get(query, variables, "ProgramSetEpisodesQuery")
 
-            result = response_json.get("data", {}).get("result", {})
+            result = (response_json.get("data") or {}).get("result", {})
             if not result:
                 break
 
@@ -639,7 +639,7 @@ class AudiothekClient:
             variables = {"id": collection_id, "offset": offset, "count": min(count, remaining)}
             response_json = self._graphql_get(query, variables, "editorialCollection")
 
-            results = response_json.get("data", {}).get("result", {})
+            results = (response_json.get("data") or {}).get("result", {})
             if not results:
                 break
 
@@ -691,7 +691,7 @@ class AudiothekClient:
             variables = {"editorialCategoryId": editorial_category_id, "offset": offset, "count": min(count, remaining)}
             response_json = self._graphql_get(query, variables, "ProgramSetsByEditorialCategoryId")
 
-            result = response_json.get("data", {}).get("result") or {}
+            result = (response_json.get("data") or {}).get("result") or {}
             page_nodes = result.get("nodes") or []
 
             if not page_nodes:
@@ -737,7 +737,7 @@ class AudiothekClient:
             variables = {"id": editorial_category_id, "offset": offset, "count": min(count, remaining)}
             response_json = self._graphql_get(query, variables, "EditorialCategoryCollections")
 
-            result = response_json.get("data", {}).get("result") or {}
+            result = (response_json.get("data") or {}).get("result") or {}
             sections = result.get("sections") or []
 
             if not sections:
