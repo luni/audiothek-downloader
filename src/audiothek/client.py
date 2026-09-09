@@ -146,11 +146,12 @@ class AudiothekClient:
                 response.raise_for_status()
                 break
             except requests.HTTPError as e:
-                if e.response.status_code == 404:
+                if e.response is not None and e.response.status_code == 404:
                     self.logger.warning("Audio file not found (404): %s", url)
                     return None
                 self.logger.error("HTTP error downloading audio: %s - %s", url, e)
-                raise DownloadError(url, e.response.status_code, str(e)) from e
+                status_code = e.response.status_code if e.response is not None else None
+                raise DownloadError(url, status_code, str(e)) from e
             except requests.RequestException as e:
                 is_retryable = self._is_incomplete_read_error(e)
                 if is_retryable and attempt < max_attempts:
@@ -255,7 +256,7 @@ class AudiothekClient:
             response.raise_for_status()
             return int(response.headers.get("content-length", 0))
         except requests.HTTPError as e:
-            if e.response.status_code == 404:
+            if e.response is not None and e.response.status_code == 404:
                 self.logger.warning("Audio file not found (404) during content length check: %s", url)
             return None
         except Exception:
@@ -277,7 +278,7 @@ class AudiothekClient:
             response.raise_for_status()
             return True, int(response.headers.get("content-length", 0))
         except requests.HTTPError as e:
-            if e.response.status_code == 404:
+            if e.response is not None and e.response.status_code == 404:
                 self.logger.warning("Audio file not found (404) during availability check: %s", url)
                 return False, None
             else:

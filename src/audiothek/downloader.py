@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from filelock import FileLock, Timeout
-from mutagen._file import File
+from mutagen import File
 
 from .cache import GraphQLCache
 from .client import AudiothekClient
