@@ -101,12 +101,6 @@ def safe_write_json(file_path: str, data: dict[str, Any], logger: logging.Logger
     except Exception as e:
         logger.error("Failed to write JSON data to %s: %s", file_path, e)
         return FileOperationResult(success=False, message=f"Failed to write JSON data: {str(e)}", file_path=file_path)
-    finally:
-        if os.path.exists(lock_path):
-            try:
-                os.remove(lock_path)
-            except OSError:
-                pass
 
 
 def set_file_modification_time(file_path: str, publish_date: str, logger: logging.Logger) -> bool:

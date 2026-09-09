@@ -289,13 +289,13 @@ class TestSafeWriteJson:
         assert "Failed to write JSON data" in result.message
         mock_logger.error.assert_called_once()
 
-    def test_safe_write_json_cleanup_lock_file(self, tmp_path: Path) -> None:
-        """Test safe_write_json cleans up lock file even on error."""
+    def test_safe_write_json_keeps_lock_file(self, tmp_path: Path) -> None:
+        """Lock files are intentionally kept so inter-process locking stays reliable."""
         mock_logger = Mock()
         test_file = tmp_path / "test.json"
         lock_file = tmp_path / "test.json.lock"
 
-        # Create a lock file that should be cleaned up
+        # Pre-existing lock file should not be removed.
         lock_file.write_text("lock")
 
         # Mock open to raise an exception
@@ -303,8 +303,7 @@ class TestSafeWriteJson:
             result = safe_write_json(str(test_file), {"key": "value"}, mock_logger)
 
         assert result.success is False
-        # Lock file should be cleaned up
-        assert not lock_file.exists()
+        assert lock_file.exists()
 
 
 class TestSetFileModificationTime:

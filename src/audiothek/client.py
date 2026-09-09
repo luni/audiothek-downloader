@@ -349,12 +349,19 @@ class AudiothekClient:
         image_url = image.get("url", "").replace("{width}", "2000") if image.get("url") else ""
         image_url_x1 = image.get("url1X1", "").replace("{width}", "2000") if image.get("url1X1") else ""
 
+        duration = node.get("duration")
+        if isinstance(duration, str):
+            try:
+                duration = int(float(duration))
+            except ValueError:
+                duration = None
+
         return EpisodeMetadata(
             id=str(node.get("id", "")),
             title=node.get("title", ""),
             description=node.get("description"),
             summary=node.get("summary"),
-            duration=node.get("duration"),
+            duration=duration,
             publish_date=node.get("publishDate"),
             program_set_id=program_set.get("id"),
             program_set_title=program_set.get("title"),

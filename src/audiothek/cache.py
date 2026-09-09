@@ -9,6 +9,8 @@ import os
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -82,8 +84,13 @@ class GraphQLCache:
             )
             conn.commit()
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.cache_path, check_same_thread=False)
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(self.cache_path, check_same_thread=False)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def get(self, query: str, variables: dict[str, Any], _query_name: str = "") -> dict[str, Any] | None:
         """Return cached GraphQL response if it exists and is fresh."""
@@ -98,19 +105,21 @@ class GraphQLCache:
                     (cache_key,),
                 ).fetchone()
 
-        if not row:
-            return None
+                if not row:
+                    return None
 
-        updated_at = float(row[1])
-        if time.time() - updated_at > self.ttl_seconds:
-            self._evict(cache_key)
-            return None
+                updated_at = float(row[1])
+                if time.time() - updated_at > self.ttl_seconds:
+                    conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
+                    conn.commit()
+                    return None
 
-        try:
-            return json.loads(row[0])
-        except json.JSONDecodeError:
-            self._evict(cache_key)
-            return None
+                try:
+                    return json.loads(row[0])
+                except json.JSONDecodeError:
+                    conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
+                    conn.commit()
+                    return None
 
     def set(self, query: str, variables: dict[str, Any], response: dict[str, Any], query_name: str = "") -> None:
         """Persist a GraphQL response in the cache."""
@@ -144,15 +153,6 @@ class GraphQLCache:
         with self._lock:
             with self._connect() as conn:
                 conn.execute("DELETE FROM graphql_cache")
-                conn.commit()
-
-    def _evict(self, cache_key: str) -> None:
-        if self.ttl_seconds <= 0:
-            return
-
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
                 conn.commit()
 
     @staticmethod
