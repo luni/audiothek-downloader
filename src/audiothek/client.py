@@ -459,6 +459,23 @@ class AudiothekClient:
             self.logger.error("Error getting program set title: %s", e)
             return None
 
+    def get_collection_title(self, collection_id: str) -> str | None:
+        """Get editorial collection title directly.
+
+        Args:
+            collection_id: The editorial collection ID
+
+        Returns:
+            The collection title, or None if not found
+
+        """
+        try:
+            _, collection_data = self.fetch_editorial_collection(collection_id, limit=1)
+            return collection_data.get("title")
+        except Exception as e:
+            self.logger.error("Error getting collection title: %s", e)
+            return None
+
     def get_title(self, resource_id: str, resource_type: str) -> str | None:
         """Get title for a resource based on its type.
 
@@ -472,8 +489,10 @@ class AudiothekClient:
         """
         if resource_type == "episode":
             return self.get_episode_title(resource_id)
-        elif resource_type in ["program", "collection"]:
+        if resource_type == "program":
             return self.get_program_set_title(resource_id)
+        if resource_type == "collection":
+            return self.get_collection_title(resource_id)
         return None
 
     @staticmethod

@@ -225,6 +225,26 @@ class TestAudiothekClient:
 
     @patch.object(AudiothekClient, '_graphql_get')
     @patch('audiothek.client.load_graphql_query')
+    def test_get_collection_title_returns_top_level_title(self, mock_load_query: Mock, mock_graphql_get: Mock) -> None:
+        """get_collection_title reads the editorial collection's top-level title."""
+        mock_load_query.return_value = "query"
+        mock_graphql_get.return_value = {
+            "data": {
+                "result": {
+                    "id": "ec1",
+                    "title": "Editorial Collection",
+                    "items": {"pageInfo": {"hasNextPage": False}, "nodes": []},
+                }
+            }
+        }
+
+        client = AudiothekClient()
+        result = client.get_collection_title("ec1")
+
+        assert result == "Editorial Collection"
+
+    @patch.object(AudiothekClient, '_graphql_get')
+    @patch('audiothek.client.load_graphql_query')
     def test_find_program_sets_by_editorial_category_id(self, mock_load_query: Mock, mock_graphql_get: Mock) -> None:
         """Test finding program sets by editorial category ID."""
         mock_load_query.return_value = "query"
@@ -312,21 +332,22 @@ class TestAudiothekClient:
         mock_episode_title.assert_not_called()
 
     @patch.object(AudiothekClient, 'get_episode_title')
-    @patch.object(AudiothekClient, 'get_program_set_title')
-    def test_get_title_collection(self, mock_program_title: Mock, mock_episode_title: Mock) -> None:
+    @patch.object(AudiothekClient, 'get_collection_title')
+    def test_get_title_collection(self, mock_collection_title: Mock, mock_episode_title: Mock) -> None:
         """Test getting title for collection resource."""
-        mock_program_title.return_value = "Collection Title"
+        mock_collection_title.return_value = "Collection Title"
 
         client = AudiothekClient()
         result = client.get_title("collection123", "collection")
 
         assert result == "Collection Title"
-        mock_program_title.assert_called_once_with("collection123")
+        mock_collection_title.assert_called_once_with("collection123")
         mock_episode_title.assert_not_called()
 
+    @patch.object(AudiothekClient, 'get_collection_title')
     @patch.object(AudiothekClient, 'get_episode_title')
     @patch.object(AudiothekClient, 'get_program_set_title')
-    def test_get_title_unknown_type(self, mock_program_title: Mock, mock_episode_title: Mock) -> None:
+    def test_get_title_unknown_type(self, mock_program_title: Mock, mock_episode_title: Mock, mock_collection_title: Mock) -> None:
         """Test getting title for unknown resource type."""
         mock_episode_title.return_value = None
         mock_program_title.return_value = None
@@ -337,6 +358,7 @@ class TestAudiothekClient:
         assert result is None
         mock_episode_title.assert_not_called()
         mock_program_title.assert_not_called()
+        mock_collection_title.assert_not_called()
 
     @patch.object(AudiothekClient, 'get_episode_title')
     @patch.object(AudiothekClient, 'get_program_set_title')

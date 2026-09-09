@@ -162,10 +162,10 @@ def test_get_program_title_collection_type(tmp_path: Path, monkeypatch: pytest.M
     """Test get_title with collection resource type."""
     client = AudiothekClient()
 
-    def _mock_get_program_set_title(resource_id):
+    def _mock_get_collection_title(resource_id):
         return "Collection Title"
 
-    monkeypatch.setattr(client, "get_program_set_title", _mock_get_program_set_title)
+    monkeypatch.setattr(client, "get_collection_title", _mock_get_collection_title)
 
     result = client.get_title("col123", "collection")
     assert result == "Collection Title"
