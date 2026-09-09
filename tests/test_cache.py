@@ -53,3 +53,14 @@ def test_graphql_cache_expires_entry(tmp_path: Path, monkeypatch: pytest.MonkeyP
     current_time["value"] += ttl + 1
     expired = cache.get(query, variables, "ExpiringQuery")
     assert expired is None
+
+
+def test_cache_dir_expands_tilde(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A cache_dir containing '~' must be expanded to the user's home directory."""
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    cache = GraphQLCache(cache_dir="~/my_cache", ttl_seconds=3600, enabled=True)
+    assert str(cache.cache_path).startswith(str(fake_home / "my_cache"))
+    assert Path(cache.cache_path).exists()

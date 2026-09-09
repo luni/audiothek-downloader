@@ -56,10 +56,10 @@ class GraphQLCache:
     @staticmethod
     def _resolve_cache_dir(cache_dir: str | os.PathLike[str] | None) -> Path:
         if cache_dir:
-            return Path(cache_dir)
+            return Path(cache_dir).expanduser()
         xdg_cache_home = os.environ.get("XDG_CACHE_HOME")
         if xdg_cache_home:
-            return Path(xdg_cache_home) / "audiothek-downloader"
+            return Path(xdg_cache_home).expanduser() / "audiothek-downloader"
         return Path.home() / ".cache" / "audiothek-downloader"
 
     def _initialize_database(self) -> None:
