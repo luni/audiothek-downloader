@@ -336,6 +336,66 @@ def test_save_nodes_skips_smaller_files(tmp_path: Path, monkeypatch: pytest.Monk
     assert (program_dir / f"{filename}.mp3").read_bytes() == b"larger"
 
 
+def test_save_nodes_keeps_existing_file_when_no_content_length(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Existing files should not be re-downloaded when the server omits content-length."""
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir(parents=True)
+
+    filename = "Existing_e1_e1"
+    (program_dir / f"{filename}.mp3").write_bytes(b"existing")
+    (program_dir / f"{filename}.jpg").write_bytes(b"old")
+    (program_dir / f"{filename}_x1.jpg").write_bytes(b"old")
+
+    calls: list[str] = []
+
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+        calls.append(f"GET:{url}")
+
+        class _Resp:
+            content = b"new"
+
+            def json(self):
+                return {}
+
+            def raise_for_status(self):
+                pass
+
+        return _Resp()
+
+    def _head(self, url: str, timeout: int | None = None):
+        calls.append(f"HEAD:{url}")
+
+        class _Resp:
+            headers = {}  # No content-length header
+
+            def raise_for_status(self):
+                pass
+
+        return _Resp()
+
+    monkeypatch.setattr("requests.Session.get", _get)
+    monkeypatch.setattr("requests.Session.head", _head)
+
+    downloader = AudiothekDownloader()
+    downloader._save_nodes(
+        [
+            {
+                "id": "e1",
+                "title": "Existing e1",
+                "image": {"url": "https://cdn.test/image_{width}.jpg", "url1X1": "https://cdn.test/image1x1_{width}.jpg"},
+                "audios": [{"downloadUrl": "https://cdn.test/audio.mp3"}],
+                "programSet": {"id": "ps1", "title": "Prog"},
+            }
+        ],
+        str(tmp_path),
+    )
+
+    # HEAD is made to check availability, but no GET should happen.
+    assert calls == ["HEAD:https://cdn.test/audio.mp3"]
+    assert not os.path.exists(program_dir / f"{filename}.mp3.bak")
+    assert (program_dir / f"{filename}.mp3").read_bytes() == b"existing"
+
+
 def test_save_nodes_no_download_url(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _save_nodes when node has no download URL."""
     downloader = AudiothekDownloader()

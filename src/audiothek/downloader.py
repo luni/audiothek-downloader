@@ -879,12 +879,11 @@ class AudiothekDownloader:
                         )
                         should_download = False
                 else:
-                    self.logger.info("Could not determine content length, will backup existing file: %s", audio_file_path)
-                    # Backup old file
-                    success, _ = backup_file(audio_file_path, self.logger)
-                    if not success:
-                        self.logger.error("Failed to backup file, skipping download")
-                        return False
+                    self.logger.info(
+                        "Could not determine content length for %s, keeping existing file rather than re-downloading unverified content",
+                        audio_file_path,
+                    )
+                    should_download = False
 
             if should_download:
                 download_success = self.client._download_audio_to_file(
