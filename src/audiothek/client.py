@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import threading
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -32,14 +33,29 @@ class AudiothekClient:
 
         """
         self.logger = logging.getLogger(__name__)
-        self._session = requests.Session()
+        self._local = threading.local()
         self._base_url = "https://api.ardaudiothek.de/graphql"
         self._cache = cache or GraphQLCache()
 
         # Configure proxy if provided
+        self._proxy = None
         if proxy:
-            proxies = {"http": proxy, "https": proxy}
-            self._session.proxies = proxies
+            self._proxy = {"http": proxy, "https": proxy}
+
+    @property
+    def _session(self) -> requests.Session:
+        """Return a thread-local requests Session.
+
+        requests.Session is not thread-safe, so each worker thread receives
+        its own session while sharing the same proxy/cache configuration.
+        """
+        session: requests.Session | None = getattr(self._local, "session", None)
+        if session is None:
+            session = requests.Session()
+            if self._proxy is not None:
+                session.proxies = self._proxy
+            self._local.session = session
+        return session
 
     @staticmethod
     def _is_incomplete_read_error(error: BaseException) -> bool:
