@@ -275,3 +275,26 @@ def test_migrate_folders_logs_warning_when_no_title(tmp_path: Path, monkeypatch:
 
     # Folder should still exist (no migration)
     assert (tmp_path / "123456").exists()
+
+
+def test_migrate_folders_skips_whitespace_only_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test migrate_folders does not rename when title is only whitespace."""
+    (tmp_path / "123456").mkdir()
+    metadata = {"id": "urn:ard:episode:test1", "programSet": {"id": "ps1"}}
+    (tmp_path / "123456" / "metadata.json").write_text(json.dumps(metadata))
+
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return ResourceInfo("program", resource_id)
+
+    def _mock_get_title(self, resource_id, resource_type):
+        return "   "
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
+
+    with caplog.at_level("WARNING"):
+        downloader = AudiothekDownloader()
+        migrate_folders(str(tmp_path), downloader, downloader.logger)
+
+    assert any("Could not get title for folder" in r.message and "123456" in r.message for r in caplog.records)
+    assert (tmp_path / "123456").exists()

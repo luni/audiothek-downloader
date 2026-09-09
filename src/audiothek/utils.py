@@ -92,9 +92,10 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
 
                     # Get program information to extract the title
                     title = downloader.client.get_title(parsed_id, resource_type)
-                    if title:
+                    sanitized_title = sanitize_folder_name(title) if title else ""
+                    if sanitized_title:
                         # Create new folder name with ID and title
-                        new_folder_name = f"{item} {sanitize_folder_name(title)}"
+                        new_folder_name = f"{item} {sanitized_title}"
                         new_folder_path = os.path.join(folder, new_folder_name)
 
                         # Rename the folder
