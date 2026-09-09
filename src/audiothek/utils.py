@@ -24,10 +24,10 @@ def sanitize_folder_name(name: str) -> str:
     # Remove or replace characters that are problematic in folder names
     # Replace forward slashes and other problematic characters with underscores
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", name)
+    # Replace any whitespace (including newlines/tabs) with a single space
+    sanitized = re.sub(r"\s+", " ", sanitized)
     # Remove leading/trailing whitespace and dots
     sanitized = sanitized.strip(" .")
-    # Replace multiple spaces with single space
-    sanitized = re.sub(r"\s+", " ", sanitized)
     # Limit length to avoid filesystem issues
     if len(sanitized) > MAX_FOLDER_NAME_LENGTH:
         sanitized = sanitized[:MAX_FOLDER_NAME_LENGTH].rstrip()

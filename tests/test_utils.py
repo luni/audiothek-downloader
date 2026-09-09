@@ -34,6 +34,8 @@ def test_sanitize_folder_name_whitespace() -> None:
     assert sanitize_folder_name(" Test Program ") == "Test Program"
     assert sanitize_folder_name("Test\tProgram") == "Test Program"  # Tab becomes space
     assert sanitize_folder_name("Test\nProgram") == "Test Program"  # Newline becomes space
+    assert sanitize_folder_name("Test Program\n") == "Test Program"  # Trailing newline stripped
+    assert sanitize_folder_name("Test\t\nProgram") == "Test Program"  # Mixed whitespace collapsed
 
 
 def test_sanitize_folder_name_empty_and_none() -> None:

@@ -170,8 +170,12 @@ class AudiothekClient:
         if response is None:
             return None
 
-        # Check if content is likely an error response rather than audio
         content = response.content
+        if not content:
+            self.logger.warning("Audio file returned empty response: %s", url)
+            return None
+
+        # Check if content is likely an error response rather than audio
         if len(content) < 1000:  # Very small files are likely error responses
             content_text = content.decode("utf-8", errors="ignore").lower()
             if any(error_indicator in content_text for error_indicator in ["not found", "error", "deleted", "removed", "unavailable", "404"]):
@@ -413,17 +417,21 @@ class AudiothekClient:
             if not result:
                 return None
 
-            # For editorial collections, the structure is slightly different
-            if "items" in result:
-                items = result.get("items", {})
-                nodes = items.get("nodes", []) or []
-                if nodes:
-                    first_node = nodes[0]
-                    program_set = first_node.get("programSet") or {}
+            # Prefer the top-level title when it is present (both program sets
+            # and editorial collections expose it at the result root).
+            if result.get("title"):
+                return result.get("title")
+
+            # Fallback to the program set title inside the first item.
+            items = result.get("items", {})
+            nodes = items.get("nodes", []) or []
+            if nodes:
+                first_node = nodes[0]
+                program_set = first_node.get("programSet") or {}
+                if program_set.get("title"):
                     return program_set.get("title")
 
-            # For direct program sets
-            return result.get("title")
+            return None
         except Exception as e:
             self.logger.error("Error getting program set title: %s", e)
             return None

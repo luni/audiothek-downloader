@@ -202,6 +202,29 @@ class TestAudiothekClient:
 
     @patch.object(AudiothekClient, '_graphql_get')
     @patch('audiothek.client.load_graphql_query')
+    def test_get_program_set_title_prefers_top_level_title(self, mock_load_query: Mock, mock_graphql_get: Mock) -> None:
+        """Top-level result title is preferred over the first node's programSet title."""
+        mock_load_query.return_value = "query"
+        mock_graphql_get.return_value = {
+            "data": {
+                "result": {
+                    "title": "Top-Level Title",
+                    "items": {
+                        "nodes": [
+                            {"programSet": {"title": "Node Program Title"}}
+                        ]
+                    }
+                }
+            }
+        }
+
+        client = AudiothekClient()
+        result = client.get_program_set_title("123456")
+
+        assert result == "Top-Level Title"
+
+    @patch.object(AudiothekClient, '_graphql_get')
+    @patch('audiothek.client.load_graphql_query')
     def test_find_program_sets_by_editorial_category_id(self, mock_load_query: Mock, mock_graphql_get: Mock) -> None:
         """Test finding program sets by editorial category ID."""
         mock_load_query.return_value = "query"
@@ -408,6 +431,19 @@ class TestAudiothekClient:
         result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
 
         assert result == b"valid audio content but small"
+
+    @patch('requests.Session.get')
+    def test_fetch_and_validate_audio_empty_response(self, mock_get: Mock) -> None:
+        """An empty response body must be treated as unavailable audio."""
+        mock_response = Mock()
+        mock_response.content = b""
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        client = AudiothekClient()
+        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+
+        assert result is None
 
     @patch("audiothek.client.time.sleep")
     @patch("requests.Session.get")

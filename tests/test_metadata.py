@@ -179,6 +179,8 @@ def test_download_collection_saves_program_set_metadata(tmp_path: Path, mock_req
     downloader = AudiothekDownloader()
     downloader._download_collection("ps1", str(tmp_path), is_editorial_collection=False)
 
+    # Program set metadata is stored in the same folder as its episodes,
+    # which uses the programSet title from the episode nodes.
     program_dir = tmp_path / "ps1 Prog"
     assert program_dir.exists()
 
@@ -198,11 +200,13 @@ def test_download_collection_saves_editorial_collection_metadata(tmp_path: Path,
     downloader = AudiothekDownloader()
     downloader._download_collection("ec1", str(tmp_path), is_editorial_collection=True)
 
-    program_dir = tmp_path / "ps1 Prog"
-    assert program_dir.exists()
+    # Editorial collections should be saved under the collection's own folder,
+    # not the first episode's program set folder.
+    collection_dir = tmp_path / "ec1 Test Editorial Collection"
+    assert collection_dir.exists()
 
-    # Check that editorial collection metadata file was created in the series folder
-    collection_file = program_dir / "ec1.json"
+    # Check that editorial collection metadata file was created in the collection folder
+    collection_file = collection_dir / "ec1.json"
     assert collection_file.exists()
 
     # Verify it's editorial collection metadata
@@ -420,9 +424,9 @@ def test_download_collection_with_editorial_collection_id_from_url(tmp_path: Pat
     downloader = AudiothekDownloader()
     downloader.download_from_url("https://www.ardsounds.de/sammlung/test/urn:ard:page:ec1/", str(tmp_path))
 
-    # Check that editorial collection metadata file was created in the series folder
-    series_folder = tmp_path / "ps1 Prog"  # Based on mock data programSet id and title
-    collection_file = series_folder / "ec1.json"
+    # Editorial collection metadata is stored in the collection's own folder.
+    collection_folder = tmp_path / "ec1 Test Editorial Collection"
+    collection_file = collection_folder / "ec1.json"
     assert collection_file.exists()
 
     # Verify it's editorial collection metadata

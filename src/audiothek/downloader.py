@@ -474,11 +474,19 @@ class AudiothekDownloader:
         """Save collection metadata and cover image."""
         collection_data = self._extract_collection_data(raw_data) if is_editorial_collection else self._extract_program_set_data(raw_data)
 
-        # Get the program folder path from the first node
         first_node = nodes[0]
         program_set = first_node.get("programSet") or {}
-        programset_id = program_set.get("id") or collection_data.get("id") or "collection"
-        programset_title = program_set.get("title") or collection_data.get("title") or ""
+
+        if is_editorial_collection:
+            # Editorial collection nodes carry their own programSet; use the
+            # collection's top-level identity for the folder name.
+            programset_id = collection_data.get("id") or program_set.get("id") or "collection"
+            programset_title = collection_data.get("title") or program_set.get("title") or ""
+        else:
+            # Program set episodes share the same programSet; using the node
+            # programSet keeps collection metadata in the same folder as episodes.
+            programset_id = program_set.get("id") or collection_data.get("id") or "program_set"
+            programset_title = program_set.get("title") or collection_data.get("title") or ""
 
         folder_name = self._program_folder_name(str(programset_id), str(programset_title))
         program_path = os.path.join(folder, folder_name)
