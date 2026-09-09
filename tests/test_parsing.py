@@ -21,6 +21,20 @@ def test_parse_url_none() -> None:
     assert AudiothekClient.parse_url("https://www.ardsounds.de/sendung/x/") is None
 
 
+def test_parse_url_ignores_query_and_fragment() -> None:
+    """URL query strings and fragments must not leak into the resource ID."""
+    base = "https://www.ardsounds.de/folge/x/urn:ard:episode:abc"
+    assert AudiothekClient.parse_url(f"{base}?share=1") == ResourceInfo(
+        resource_type="episode", resource_id="urn:ard:episode:abc"
+    )
+    assert AudiothekClient.parse_url(f"{base}#section") == ResourceInfo(
+        resource_type="episode", resource_id="urn:ard:episode:abc"
+    )
+    assert AudiothekClient.parse_url("https://www.ardsounds.de/program/123456?autoplay=1") == ResourceInfo(
+        resource_type="program", resource_id="123456"
+    )
+
+
 def test_parse_url_fallback_urn() -> None:
     # Test fallback for other urn types
     assert AudiothekClient.parse_url("https://www.ardsounds.de/x/urn:ard:other:abc/") == ResourceInfo(resource_type="program", resource_id="urn:ard:other:abc")

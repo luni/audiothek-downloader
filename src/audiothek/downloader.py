@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 from filelock import FileLock, Timeout
 from mutagen import File
@@ -302,62 +303,51 @@ class AudiothekDownloader:
         if len(files) <= 1:
             return {"removed": 0, "errors": 0}  # No comparison needed
 
+        # Treat high-quality AAC/MP4/M4A (>=96kbit) as roughly 33kbit better than
+        # raw bitrate so that 96kbit AAC outranks 128kbit MP3 while higher raw
+        # bitrates still win for both codecs.
+        aac_quality_advantage = 33
+
         # Get quality information for each file
         file_qualities: dict[str, dict[str, Any]] = {}
         for ext, file_path in files.items():
             quality = self._get_audio_quality(file_path)
             if quality is not None:
-                file_qualities[ext] = {"path": file_path, "bitrate": quality}
+                effective = quality
+                if ext in {".mp4", ".aac", ".m4a"} and quality >= 96:
+                    effective = quality + aac_quality_advantage
+                file_qualities[ext] = {"path": file_path, "bitrate": quality, "effective": effective}
 
         if not file_qualities:
             return {"removed": 0, "errors": 0}
 
-        # Determine which files to keep/remove
-        files_to_remove = []
-        best_file = None
-        best_bitrate = 0
+        # Find the best quality file by effective bitrate
+        best_file: str | None = None
+        best_effective = -1
+        for info in file_qualities.values():
+            if info["effective"] > best_effective:
+                best_effective = info["effective"]
+                best_file = info["path"]
 
-        # Find the best quality file
-        for ext, info in file_qualities.items():
-            bitrate = info["bitrate"]
+        if best_file is None:
+            return {"removed": 0, "errors": 0}
 
-            # MP4/AAC with >=96kbit is considered better than MP3 128kbit
-            if ext in [".mp4", ".aac", ".m4a"]:
-                # AAC/MP4 files - prefer higher bitrate, but even 96kbit is better than MP3 128kbit
-                if bitrate >= 96:
-                    if not best_file or bitrate > best_bitrate or (best_file and best_file.endswith(".mp3")):
-                        best_file = info["path"]
-                        best_bitrate = bitrate
-            elif ext == ".mp3":
-                # MP3 files
-                if not best_file or (best_file and best_file.endswith(".mp3") and bitrate > best_bitrate):
-                    best_file = info["path"]
-                    best_bitrate = bitrate
-
-        # If we have a best file, remove lower quality ones
-        if best_file:
-            for ext, info in file_qualities.items():
-                if info["path"] != best_file:
-                    # Special logic: MP4/AAC >=96kbit beats MP3 128kbit
-                    if ext == ".mp3" and info["bitrate"] <= 128 and any(other_ext in [".mp4", ".aac", ".m4a"] for other_ext in file_qualities.keys()):
-                        files_to_remove.append(info["path"])
-                    # Otherwise, remove if bitrate is lower
-                    elif info["bitrate"] < best_bitrate:
-                        files_to_remove.append(info["path"])
-
-        # Remove the files
-        for file_path in files_to_remove:
-            if dry_run:
-                self.logger.info("DRY RUN: Would remove lower quality file: %s", file_path)
-                removed_count += 1
-            else:
-                try:
-                    os.remove(file_path)
-                    self.logger.info("Removed lower quality file: %s", file_path)
+        # Remove lower quality files (everything with a lower effective bitrate)
+        for info in file_qualities.values():
+            if info["path"] == best_file:
+                continue
+            if info["effective"] < best_effective:
+                if dry_run:
+                    self.logger.info("DRY RUN: Would remove lower quality file: %s", info["path"])
                     removed_count += 1
-                except OSError as e:
-                    self.logger.error("Failed to remove file %s: %s", file_path, e)
-                    error_count += 1
+                else:
+                    try:
+                        os.remove(info["path"])
+                        self.logger.info("Removed lower quality file: %s", info["path"])
+                        removed_count += 1
+                    except OSError as e:
+                        self.logger.error("Failed to remove file %s: %s", info["path"], e)
+                        error_count += 1
 
         return {"removed": removed_count, "errors": error_count}
 
@@ -374,19 +364,14 @@ class AudiothekDownloader:
         try:
             audio = File(file_path)
             if audio is not None:
-                bitrate_value: int | None = None
-                if hasattr(audio.info, "bitrate"):
-                    bitrate_value = audio.info.bitrate
-                # For some formats, bitrate might be in different location
-                elif hasattr(audio, "info") and hasattr(audio.info, "bitrate"):
-                    bitrate_value = audio.info.bitrate
+                bitrate_value: int | None = getattr(audio.info, "bitrate", None)
 
                 if bitrate_value is None:
                     return None
 
                 # Mutagen usually exposes bitrate in bps. Normalize to kbps to match
                 # quality thresholds used across the downloader (e.g. 96/128 kbps).
-                return bitrate_value // 1000 if bitrate_value > 1000 else bitrate_value
+                return bitrate_value // 1000 if bitrate_value >= 1000 else bitrate_value
         except Exception as e:
             self.logger.debug("Could not read bitrate from %s: %s", file_path, e)
         return None
@@ -786,7 +771,7 @@ class AudiothekDownloader:
             with self._locked_file_operation(image_file_path, "write"):
                 if not os.path.exists(image_file_path):
                     try:
-                        self.client._download_to_file(metadata.image_urls["image_url"], image_file_path)
+                        self.client._download_to_file(metadata.image_urls["image_url"], image_file_path, check_status=True)
                         if publish_date:
                             set_file_modification_time(image_file_path, publish_date, self.logger)
                     except Exception as e:
@@ -796,7 +781,7 @@ class AudiothekDownloader:
             with self._locked_file_operation(image_file_x1_path, "write"):
                 if not os.path.exists(image_file_x1_path):
                     try:
-                        self.client._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path)
+                        self.client._download_to_file(metadata.image_urls["image_url_x1"], image_file_x1_path, check_status=True)
                         if publish_date:
                             set_file_modification_time(image_file_x1_path, publish_date, self.logger)
                     except Exception as e:
@@ -931,14 +916,34 @@ class AudiothekDownloader:
 
     def _get_audio_file_extension(self, url: str) -> str:
         """Get the appropriate file extension for an audio URL."""
-        url_lower = url.lower()
-        if url_lower.endswith(".m4a"):
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+
+        # Prefer the path extension to avoid mis-detecting format hints in domains.
+        if path.endswith(".m4a"):
             return ".m4a"
-        elif url_lower.endswith(".mp3"):
+        if path.endswith(".mp3"):
             return ".mp3"
-        elif "aac" in url_lower:
+        if path.endswith(".aac"):
             return ".aac"
-        elif "mp4" in url_lower:
+        if path.endswith(".mp4"):
+            return ".mp4"
+
+        # No path extension: check the query string for an explicit format parameter.
+        query = parsed.query.lower()
+        format_match = re.search(r"\bformat=(mp3|mp4|aac|m4a)\b", query)
+        if format_match:
+            return f".{format_match.group(1)}"
+
+        # Fallback to any format hint in the path/query, ignoring the domain.
+        hint = f"{parsed.path}?{parsed.query}".lower()
+        if "m4a" in hint:
+            return ".m4a"
+        if "mp3" in hint:
+            return ".mp3"
+        if "aac" in hint:
+            return ".aac"
+        if "mp4" in hint:
             return ".mp4"
 
         # Default to .mp3 for backward compatibility

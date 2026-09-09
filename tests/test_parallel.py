@@ -364,6 +364,17 @@ class TestParallelDownloadNodes:
         assert result.success is True  # At least one succeeded
         assert "episodes" in result.message
 
+    def test_parallel_download_nodes_counts_returned_results(self) -> None:
+        """False returns from process_node must be counted as failures, not successes."""
+        nodes = [{"id": "1"}, {"id": "2"}, {"id": "3"}]
+
+        def process_node(node, index, total):
+            return node["id"] in ["1", "3"]
+
+        result = parallel_download_nodes(nodes, process_node)
+        assert result.success is True
+        assert result.message == "Downloaded 2 episodes with 1 errors"
+
     def test_parallel_download_nodes_message_formatting(self) -> None:
         """Test parallel_download_nodes message formatting for different scenarios."""
         # Test singular vs plural

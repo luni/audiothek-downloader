@@ -112,7 +112,7 @@ def parallel_download_nodes(
 
     results = parallel_process(nodes, process_node_func, max_workers, logger)
 
-    success_count = sum(1 for success, _, _ in results if success)
+    success_count = sum(1 for _, node_result, _ in results if node_result)
     error_count = len(results) - success_count
 
     if error_count > 0:

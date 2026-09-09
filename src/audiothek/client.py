@@ -254,7 +254,10 @@ class AudiothekClient:
         try:
             response = self._session.head(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return int(response.headers.get("content-length", 0))
+            content_length = response.headers.get("content-length")
+            if content_length is None:
+                return None
+            return int(content_length)
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 self.logger.warning("Audio file not found (404) during content length check: %s", url)
@@ -276,7 +279,8 @@ class AudiothekClient:
         try:
             response = self._session.head(url, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            return True, int(response.headers.get("content-length", 0))
+            content_length = response.headers.get("content-length")
+            return True, int(content_length) if content_length is not None else None
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 self.logger.warning("Audio file not found (404) during availability check: %s", url)
@@ -488,14 +492,16 @@ class AudiothekClient:
         except Exception:
             return None
 
-        # Extract URN or numeric ID
-        urn_match = re.search(r"/(urn:ard:[^/]+)/?$", url)
+        path = parsed_url.path
+
+        # Extract URN or numeric ID from the URL path (query/fragment is irrelevant)
+        urn_match = re.search(r"/(urn:ard:[^/]+)/?$", path)
         if urn_match:
             resource_id = urn_match.group(1)
             resource_info = AudiothekClient.determine_resource_type_from_id(resource_id)
             return resource_info
 
-        numeric_match = re.search(r"/(\d+)/?$", url)
+        numeric_match = re.search(r"/(\d+)/?$", path)
         if numeric_match:
             resource_id = numeric_match.group(1)
             return ResourceInfo("program", resource_id)

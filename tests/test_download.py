@@ -639,7 +639,11 @@ def test_get_audio_file_extension() -> None:
     assert downloader._get_audio_file_extension("https://example.com/audio.m4a") == ".m4a"
     assert downloader._get_audio_file_extension("https://example.com/audio?format=aac") == ".aac"
     assert downloader._get_audio_file_extension("https://example.com/audio?format=mp4") == ".mp4"
+    assert downloader._get_audio_file_extension("https://example.com/audio?format=mp3") == ".mp3"
     assert downloader._get_audio_file_extension("https://example.com/audio") == ".mp3"  # Default
+    assert downloader._get_audio_file_extension("https://example.com/audio.mp3?token=abc") == ".mp3"
+    assert downloader._get_audio_file_extension("https://example.com/audio.m4a?token=abc") == ".m4a"
+    assert downloader._get_audio_file_extension("https://aac.example.com/audio.mp3") == ".mp3"
 
 
 def test_all_files_get_timestamp_from_publish_date(tmp_path: Path, mock_requests_get: object) -> None:
@@ -940,6 +944,31 @@ def test_compare_and_remove_files_handles_bps_bitrate_values(tmp_path: Path) -> 
     assert result["removed"] == 1
     assert not mp3_file.exists()
     assert m4a_file.exists()
+
+
+def test_compare_and_remove_files_prefers_high_bitrate_mp3_over_low_aac(tmp_path: Path) -> None:
+    """A high-bitrate MP3 must not be discarded in favor of a low-bitrate AAC."""
+    downloader = AudiothekDownloader()
+
+    mp3_file = tmp_path / "episode.mp3"
+    m4a_file = tmp_path / "episode.m4a"
+    mp3_file.write_bytes(b"fake mp3")
+    m4a_file.write_bytes(b"fake m4a")
+
+    def mock_get_quality(file_path: str) -> int | None:
+        if file_path.endswith(".mp3"):
+            return 320
+        if file_path.endswith(".m4a"):
+            return 96
+        return None
+
+    downloader._get_audio_quality = mock_get_quality
+    files = {".mp3": str(mp3_file), ".m4a": str(m4a_file)}
+
+    result = downloader._compare_and_remove_files("episode", files, str(tmp_path), dry_run=False)
+    assert result["removed"] == 1
+    assert mp3_file.exists()
+    assert not m4a_file.exists()
 
 
 def test_remove_lower_quality_files_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

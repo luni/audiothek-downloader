@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from audiothek import AudiothekDownloader
 from audiothek.utils import migrate_folders
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]%(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 @dataclass
