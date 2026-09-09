@@ -13,6 +13,13 @@ from audiothek.models import ResourceInfo
 from audiothek.utils import migrate_folders
 
 
+def test_program_folder_name_sanitizes_whitespace_only_title() -> None:
+    """Whitespace-only titles must not produce trailing spaces in folder names."""
+    assert AudiothekDownloader._program_folder_name("ps1", "   ") == "ps1"
+    assert AudiothekDownloader._program_folder_name("ps1", "\t\n") == "ps1"
+    assert AudiothekDownloader._program_folder_name("ps1", "A Normal Title") == "ps1 A Normal Title"
+
+
 def test_update_all_folders_numeric_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test update_all_folders with numeric folder names"""
     # Create test folders with numeric names

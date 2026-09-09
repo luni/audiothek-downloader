@@ -67,8 +67,9 @@ class AudiothekDownloader:
             Folder name with ID and sanitized title
 
         """
-        if programset_title:
-            return f"{programset_id} {sanitize_folder_name(programset_title)}"
+        sanitized = sanitize_folder_name(programset_title)
+        if sanitized:
+            return f"{programset_id} {sanitized}"
         return programset_id
 
     @contextmanager
