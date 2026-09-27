@@ -1,4 +1,4 @@
-"""Caching utilities for Audiothek GraphQL responses."""
+"""Caching utilities for ARD Sounds GraphQL responses."""
 
 from __future__ import annotations
 

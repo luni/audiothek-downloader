@@ -1,4 +1,4 @@
-"""ARD Audiothek downloader class."""
+"""ARD Sounds downloader class."""
 
 import logging
 import os
@@ -31,7 +31,7 @@ AUDIO_FILE_EXTENSIONS = (".mp3", ".mp4", ".aac", ".m4a")
 
 
 class AudiothekDownloader:
-    """ARD Audiothek downloader class."""
+    """ARD Sounds downloader class."""
 
     def __init__(
         self,
@@ -95,10 +95,10 @@ class AudiothekDownloader:
             raise FileOperationError(file_path, operation, error_msg) from exc
 
     def download_from_url(self, url: str, folder: str | None = None) -> DownloadResult:
-        """Download content from an ARD Audiothek URL.
+        """Download content from an ARD Sounds URL.
 
         Args:
-            url: The URL of the ARD Audiothek show or collection
+            url: The URL of the ARD Sounds show or collection
             folder: The output directory (overrides base_folder if provided)
 
         Returns:
@@ -443,7 +443,7 @@ class AudiothekDownloader:
         }
 
     def _download_collection(self, resource_id: str, folder: str, is_editorial_collection: bool) -> DownloadResult:
-        """Download episodes from ARD Audiothek.
+        """Download episodes from ARD Sounds.
 
         Args:
             resource_id: The program set ID extracted from the URL

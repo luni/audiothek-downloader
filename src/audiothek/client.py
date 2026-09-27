@@ -1,4 +1,4 @@
-"""Audiothek API client for handling HTTP requests and GraphQL operations."""
+"""ARD Sounds API client for handling HTTP requests and GraphQL operations."""
 
 import json
 import logging
@@ -19,7 +19,7 @@ from .utils import REQUEST_TIMEOUT, load_graphql_query
 
 
 class AudiothekClient:
-    """Client for ARD Audiothek API operations."""
+    """Client for ARD Sounds API operations."""
 
     def __init__(
         self,
@@ -589,7 +589,7 @@ class AudiothekClient:
 
     @staticmethod
     def parse_url(url: str) -> ResourceInfo | None:
-        """Parse Audiothek URL and return resource info.
+        """Parse ARD Sounds URL and return resource info.
 
         Args:
             url: The URL to parse

@@ -23,7 +23,7 @@ DEAD_FILE_MIN_AGE_SECONDS = 60
 
 
 def is_valid_resource_id(resource_id: str) -> bool:
-    """Return True if the string looks like a usable ARD Audiothek resource ID.
+    """Return True if the string looks like a usable ARD Sounds resource ID.
 
     This is a lightweight local check that mirrors the first layer of
     AudiothekClient.determine_resource_type_from_id without needing a client.

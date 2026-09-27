@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "audiothek-downloader"
 version = "0.5"
-description = "Script that can download mp3s and covers from ARD audiothek"
+description = "Script that can download mp3s and covers from ARD Sounds"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MPL-2.0"

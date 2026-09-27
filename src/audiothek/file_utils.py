@@ -138,7 +138,7 @@ def set_file_modification_time(file_path: str, publish_date: str, logger: loggin
 
     """
     try:
-        # Parse the publish date - ARD Audiothek typically uses ISO 8601 format
+        # Parse the publish date - ARD Sounds typically uses ISO 8601 format
         # Example: "2023-12-01T10:00:00.000Z" or "2023-12-01T10:00:00Z"
         if not isinstance(publish_date, str):
             publish_date = str(publish_date)

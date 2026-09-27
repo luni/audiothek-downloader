@@ -104,7 +104,7 @@ def test_argument_parser_setup() -> None:
     import argparse
 
     # Import the parser setup by simulating the main block setup
-    parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
+    parser = argparse.ArgumentParser(description="ARD Sounds downloader.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--url",
@@ -642,7 +642,7 @@ def test_argument_parser_includes_dry_run() -> None:
     import argparse
 
     # Import the parser setup by simulating the main block setup
-    parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
+    parser = argparse.ArgumentParser(description="ARD Sounds downloader.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--url", "-u", type=str, default="", help="Insert audiothek url")
     group.add_argument("--id", "-i", type=str, default="", help="Insert audiothek resource ID directly")

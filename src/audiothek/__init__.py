@@ -1,4 +1,4 @@
-"""ARD Audiothek library for downloading audio content."""
+"""ARD Sounds library for downloading audio content."""
 
 from .client import AudiothekClient
 from .downloader import AudiothekDownloader

@@ -1,6 +1,6 @@
-# ARD Audiothek Downloader
+# ARD Sounds Downloader
 
-A powerful Python tool for downloading content from the ARD Audiothek platform. Download entire programs, editorial collections, or individual episodes with metadata, cover art, and audio files in the highest available quality.
+A powerful Python tool for downloading content from the ARD Sounds platform. Download entire programs, editorial collections, or individual episodes with metadata, cover art, and audio files in the highest available quality.
 
 [![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green.svg)](LICENSE)
@@ -72,7 +72,7 @@ audiothek --update-folders
 
 | Option | Description |
 |--------|-------------|
-| `--url`, `-u` | ARD Audiothek URL to download |
+| `--url`, `-u` | ARD Sounds URL to download |
 | `--id`, `-i` | Direct resource ID (URN or numeric) |
 | `--folder`, `-f` | Output directory (default: `./output`) |
 | `--cache-dir` | Directory for the on-disk GraphQL response cache (default: `~/.cache/audiothek-downloader`) |
@@ -207,7 +207,7 @@ The project uses several code quality tools:
 
 - Only episodes with accessible `downloadUrl` or streaming `url` can be downloaded
 - DRM-protected content may not be downloadable
-- Please respect ARD Audiothek's terms of service
+- Please respect ARD Sounds' terms of service
 - API changes by ARD may require updates to the GraphQL queries in `src/audiothek/graphql/`
 
 ## License

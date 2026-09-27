@@ -31,13 +31,13 @@ class DownloadRequest:
 
 
 def main() -> int:
-    """Parse command line arguments and download episodes from ARD Audiothek.
+    """Parse command line arguments and download episodes from ARD Sounds.
 
     Returns:
         0 on success, 1 on failure
 
     """
-    parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
+    parser = argparse.ArgumentParser(description="ARD Sounds downloader.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--url",
@@ -139,7 +139,7 @@ def main() -> int:
 
 
 def _process_request(request: DownloadRequest) -> int:
-    """Parse URL and download episodes from ARD Audiothek.
+    """Parse URL and download episodes from ARD Sounds.
 
     Args:
         request: The download request configuration
