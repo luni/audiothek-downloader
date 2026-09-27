@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -564,6 +565,13 @@ def test_migrate_folders_skips_when_target_exists(tmp_path: Path, monkeypatch: p
     assert any("target folder already exists" in r.message for r in caplog.records)
 
 
+def _write_stale(path: Path) -> None:
+    """Write a file backdated past the cleanup minimum age."""
+    path.write_bytes(b"x")
+    old = time.time() - 3600
+    os.utime(path, (old, old))
+
+
 def test_cleanup_files_deletes_dead_artifacts(tmp_path: Path) -> None:
     """cleanup_files removes stale locks, parts and temp files."""
     logger = logging.getLogger("test")
@@ -572,7 +580,7 @@ def test_cleanup_files_deletes_dead_artifacts(tmp_path: Path) -> None:
     content = program_dir / "ep.mp3"
     content.write_bytes(b"audio")
     for name in ("ep.mp3.lock", "ep.mp3.part", "ep.json.tmp", "ep.mp3-temp"):
-        (program_dir / name).write_bytes(b"x")
+        _write_stale(program_dir / name)
 
     assert cleanup_files(str(tmp_path), logger) is True
 
@@ -611,11 +619,24 @@ def test_cleanup_files_skips_hidden_entries(tmp_path: Path) -> None:
     assert (hidden_dir / "stale.lock").exists()
 
 
+def test_cleanup_files_skips_fresh_artifacts(tmp_path: Path) -> None:
+    """Recently-written artifacts may be in-flight downloads and are kept."""
+    logger = logging.getLogger("test")
+    fresh = tmp_path / "ep.mp3.part"
+    fresh.write_bytes(b"x")
+    old_file = tmp_path / "old.mp3.lock"
+    _write_stale(old_file)
+
+    assert cleanup_files(str(tmp_path), logger) is True
+    assert fresh.exists()
+    assert not old_file.exists()
+
+
 def test_cleanup_files_dry_run_deletes_nothing(tmp_path: Path) -> None:
     """Dry run only logs deletions."""
     logger = logging.getLogger("test")
     stale = tmp_path / "ep.mp3.lock"
-    stale.write_bytes(b"x")
+    _write_stale(stale)
 
     assert cleanup_files(str(tmp_path), logger, dry_run=True) is True
     assert stale.exists()
@@ -630,8 +651,8 @@ def test_cleanup_files_missing_folder() -> None:
 def test_cleanup_files_delete_error_returns_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A failed deletion marks the run as failed but keeps going."""
     logger = logging.getLogger("test")
-    (tmp_path / "a.lock").write_bytes(b"x")
-    (tmp_path / "b.lock").write_bytes(b"x")
+    _write_stale(tmp_path / "a.lock")
+    _write_stale(tmp_path / "b.lock")
 
     real_remove = os.remove
     calls = []
@@ -648,3 +669,63 @@ def test_cleanup_files_delete_error_returns_false(tmp_path: Path, monkeypatch: p
     assert len(calls) == 2
     assert (tmp_path / "a.lock").exists()
     assert not (tmp_path / "b.lock").exists()
+
+
+def test_update_all_folders_skips_hidden_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hidden directories are never scanned for resource IDs."""
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    (hidden / "ep.json").write_text(json.dumps({"id": "urn:ard:episode:x", "programSet": {"id": "123456"}}))
+
+    calls = []
+
+    def _mock_determine(self, resource_id):
+        calls.append(resource_id)
+        return ResourceInfo(resource_id=resource_id, resource_type="programSet")
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine)
+    downloader = AudiothekDownloader()
+    result = downloader.update_all_folders(str(tmp_path))
+
+    assert result.success
+    assert calls == []
+
+
+def test_process_folder_quality_skips_dotfiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hidden files are never considered by quality cleanup."""
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    low = program_dir / ".a.mp3"
+    high = program_dir / ".a.m4a"
+    low.write_bytes(b"x")
+    high.write_bytes(b"x")
+
+    def _mock_quality(self, file_path):
+        return {"mp3": 128, "m4a": 192}[file_path.rsplit(".", 1)[-1]]
+
+    monkeypatch.setattr(AudiothekDownloader, "_get_audio_quality", _mock_quality)
+    downloader = AudiothekDownloader()
+    result = downloader._process_folder_quality(str(program_dir))
+
+    assert result["removed"] == 0
+    assert low.exists() and high.exists()
+
+
+def test_remove_lower_quality_skips_hidden_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quality cleanup does not descend into hidden directories."""
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    low = hidden / "ep.mp3"
+    high = hidden / "ep.m4a"
+    low.write_bytes(b"x")
+    high.write_bytes(b"x")
+
+    def _mock_quality(self, file_path):
+        return {"mp3": 128, "m4a": 192}[file_path.rsplit(".", 1)[-1]]
+
+    monkeypatch.setattr(AudiothekDownloader, "_get_audio_quality", _mock_quality)
+    downloader = AudiothekDownloader()
+    result = downloader.remove_lower_quality_files(str(tmp_path))
+
+    assert result.success
+    assert low.exists() and high.exists()

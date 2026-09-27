@@ -1,0 +1,43 @@
+name: Mutation Testing
+
+on:
+  # nightly, 04:00 UTC
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutmut:
+    name: Mutation Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python environment
+        run: uv sync
+
+      - name: Run mutmut
+        run: uv run mutmut run
+
+      - name: Show results
+        if: always()
+        run: uv run mutmut results
+
+      - name: Upload mutmut results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutmut-results
+          path: mutants/
+          retention-days: 30

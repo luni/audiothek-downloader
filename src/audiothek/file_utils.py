@@ -5,12 +5,10 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
-from typing import Any, TypeVar
+from datetime import UTC, datetime
+from typing import Any
 
 import filelock
-
-T = TypeVar("T")
 
 
 def file_lock_path(file_path: str) -> str:
@@ -154,7 +152,7 @@ def set_file_modification_time(file_path: str, publish_date: str, logger: loggin
         # The API publishes UTC; treat naive timestamps as UTC rather than
         # silently assuming the local timezone.
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
 
         # Convert to timestamp and set file modification time
         timestamp = dt.timestamp()

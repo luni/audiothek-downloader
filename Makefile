@@ -43,6 +43,11 @@ bandit:
 pyright:
 	pyright
 
+# Mutation testing (mutates src/audiothek/, runs the test suite per mutant)
+mutation:
+	uv run mutmut run
+	uv run mutmut results
+
 # Validate the code (format + check)
 validate: format check complexity bandit pyright vulture
 	@echo "Validation passed. Your code is ready to push."

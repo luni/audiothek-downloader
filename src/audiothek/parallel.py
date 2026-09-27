@@ -3,14 +3,12 @@
 import concurrent.futures
 import logging
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 from .models import DownloadResult
 
-T = TypeVar("T")
 
-
-def parallel_process(
+def parallel_process[T](
     items: list[Any],
     process_func: Callable[[Any, int, int], T],
     max_workers: int = 4,
@@ -59,7 +57,7 @@ def parallel_process(
     return [indexed_results[index] for index in range(len(items))]
 
 
-def _safe_process_item(
+def _safe_process_item[T](
     process_func: Callable[[Any, int, int], T],
     item: object,  # Use object instead of Any to avoid linting error
     index: int,

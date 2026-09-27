@@ -7,7 +7,7 @@ name = "audiothek-downloader"
 version = "0.4"
 description = "Script that can download mp3s and covers from ARD audiothek"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = "MPL-2.0"
 dependencies = [
     "requests>=2.34.2",
@@ -42,10 +42,11 @@ dev = [
     "bandit>=1.9.4",
     "aiohttp>=3.14.3",
     "pygments>=2.21.0",
+    "mutmut>=3.8",
 ]
 
 [tool.ruff]
-exclude = ["docs", "tests"]
+exclude = ["docs", "tests", "mutants"]
 line-length = 160
 indent-width = 4  # Same as autopep8 default
 
@@ -79,14 +80,22 @@ addopts = [
 pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "function"
 
+[tool.mutmut]
+source_paths = ["src/audiothek"]
+also_copy = ["src/audiothek/graphql", "README.md", "LICENSE"]
+pytest_add_cli_args_test_selection = ["tests"]
+# --no-cov: the coverage fail-under threshold would make every mutant
+# look killed regardless of test outcome.
+pytest_add_cli_args = ["-x", "-q", "--no-cov"]
+
 [tool.pyright]
-exclude = ["**/__pycache__", "**/node_modules", "**/dist", "**/build", "**/venv", "**/.venv", "**/tests"]
+exclude = ["**/__pycache__", "**/node_modules", "**/dist", "**/build", "**/venv", "**/.venv", "**/tests", "**/mutants"]
 
 [tool.bandit]
-exclude_dirs = [".venv", "tests"]
+exclude_dirs = [".venv", "tests", "mutants"]
 
 [tool.vulture]
-exclude = ["dist", "build", "venv", ".venv", "tests"]
+exclude = ["dist", "build", "venv", ".venv", "tests", "mutants"]
 ignore_decorators = ["@app.route", "@require_*"]
 ignore_names = ["visit_*", "do_*"]
 # make_whitelist = true

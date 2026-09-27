@@ -17,27 +17,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Cache Primes
-        id: cache-primes
-        uses: actions/cache@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
         with:
-          path: |
-            ~/.cache/uv
-            ~/.cache/pip
-          key: uv-cache-${{ hashFiles('**/pyproject.toml') }}
-          restore-keys: |
-            uv-cache-
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python environment
-        run: |
-          wget -qO- https://astral.sh/uv/install.sh | sh
-          uv sync
-
-      - name: Install package in editable mode
-        run: |
-          uv pip install -e .
+        run: uv sync
 
       - name: Run Ruff (PEP 8 Formatting)
         run: |
@@ -67,8 +56,14 @@ jobs:
         run: |
           uv run make test
 
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: ./coverage.xml
+
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml,./htmlcov/

@@ -102,6 +102,8 @@ class AudiothekClient:
             )
             response.raise_for_status()
             data = response.json()
+            if not isinstance(data, dict):
+                raise GraphQLError(query_name or "unknown", variables, "Invalid GraphQL response: expected a JSON object")
             # Responses carrying GraphQL errors are not cached: a transient
             # failure would otherwise be replayed as "not found" for the TTL.
             if not (isinstance(data, dict) and data.get("errors")):
@@ -128,13 +130,23 @@ class AudiothekClient:
             DownloadError: If the download fails
 
         """
+        part_path = f"{file_path}.part"
         try:
-            response = self._session.get(url, timeout=REQUEST_TIMEOUT)
-            if check_status:
-                response.raise_for_status()
-            with open(file_path, "wb") as f:
-                f.write(response.content)
+            response = self._session.get(url, timeout=REQUEST_TIMEOUT, stream=True)
+            try:
+                if check_status:
+                    response.raise_for_status()
+                with open(part_path, "wb") as f:
+                    for chunk in self._iter_response_chunks(response, 64 * 1024):
+                        if chunk:
+                            f.write(chunk)
+            finally:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+            os.replace(part_path, file_path)
         except requests.RequestException as e:
+            self._remove_partial_file(part_path)
             status_code = None
             if hasattr(e, "response") and e.response is not None and hasattr(e.response, "status_code"):
                 status_code = e.response.status_code
@@ -142,9 +154,13 @@ class AudiothekClient:
             self.logger.error(error_msg)
             raise DownloadError(url, status_code, error_msg) from e
         except OSError as e:
+            self._remove_partial_file(part_path)
             error_msg = f"Failed to write to {file_path}: {str(e)}"
             self.logger.error(error_msg)
             raise DownloadError(url, None, error_msg) from e
+        except Exception:
+            self._remove_partial_file(part_path)
+            raise
 
     @staticmethod
     def _iter_response_chunks(response: requests.Response, chunk_size: int) -> Iterator[bytes]:

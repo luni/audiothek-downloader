@@ -2,7 +2,7 @@
 
 A powerful Python tool for downloading content from the ARD Audiothek platform. Download entire programs, editorial collections, or individual episodes with metadata, cover art, and audio files in the highest available quality.
 
-[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MPL--2.0-green.svg)](LICENSE)
 
 ## Features
@@ -27,7 +27,7 @@ A powerful Python tool for downloading content from the ARD Audiothek platform. 
 
 ### Requirements
 
-- Python 3.10 or higher
+- Python 3.13 or higher
 - [uv](https://docs.astral.sh/uv/) for dependency management
 
 ### Setup

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 from importlib import resources
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,9 @@ TRANSIENT_FILE_SUFFIXES = (".lock", ".bak", ".part", ".tmp", "-temp")
 # Artifacts that cleanup removes. .bak files are intentionally kept - they are
 # the only recovery path for interrupted re-downloads.
 DEAD_FILE_SUFFIXES = (".lock", ".part", ".tmp", "-temp")
+# Artifacts younger than this are left alone: they may belong to an in-flight
+# download running concurrently.
+DEAD_FILE_MIN_AGE_SECONDS = 60
 
 
 def is_valid_resource_id(resource_id: str) -> bool:
@@ -277,6 +281,13 @@ def cleanup_files(folder: str, logger: logging.Logger, dry_run: bool = False) ->
             if name.startswith(".") or not name.lower().endswith(DEAD_FILE_SUFFIXES):
                 continue
             file_path = os.path.join(dirpath, name)
+            try:
+                age_seconds = time.time() - os.path.getmtime(file_path)
+            except OSError:
+                continue
+            if age_seconds < DEAD_FILE_MIN_AGE_SECONDS:
+                logger.debug("Skipping fresh artifact (possibly in use): %s", file_path)
+                continue
             if dry_run:
                 logger.info("DRY RUN: Would delete %s", file_path)
                 deleted += 1
@@ -339,6 +350,8 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
     # Find all subdirectories and migrate them to the sanitized ID + Title schema.
     try:
         for item in os.listdir(folder):
+            if item.startswith("."):
+                continue
             item_path = os.path.join(folder, item)
             if not os.path.isdir(item_path):
                 continue

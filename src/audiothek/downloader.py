@@ -165,6 +165,8 @@ class AudiothekDownloader:
         # Find all subdirectories and update them by their stored/original resource ID.
         try:
             for item in os.listdir(target_folder):
+                if item.startswith("."):
+                    continue
                 item_path = os.path.join(target_folder, item)
                 if not os.path.isdir(item_path):
                     continue
@@ -222,6 +224,8 @@ class AudiothekDownloader:
         # Find all subdirectories
         try:
             for item in os.listdir(target_folder):
+                if item.startswith("."):
+                    continue
                 item_path = os.path.join(target_folder, item)
                 if os.path.isdir(item_path):
                     result = self._process_folder_quality(item_path, dry_run)
@@ -258,6 +262,8 @@ class AudiothekDownloader:
             # by case (e.g. "x.MP3" vs "x.mp3") are not silently dropped.
             file_groups: dict[str, dict[str, str]] = {}
             for file in os.listdir(folder_path):
+                if file.startswith("."):
+                    continue
                 file_path = os.path.join(folder_path, file)
                 if os.path.isfile(file_path):
                     base_name, ext = os.path.splitext(file)

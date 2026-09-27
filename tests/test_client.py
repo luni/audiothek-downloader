@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 import requests
-from audiothek.exceptions import DownloadError
+from audiothek.exceptions import DownloadError, GraphQLError
 
 from audiothek import AudiothekClient, ResourceInfo
 
@@ -98,6 +98,56 @@ class TestAudiothekClient:
         client._cache.set.assert_called_once()
 
     @patch('requests.Session.get')
+    def test_graphql_get_rejects_non_dict_response(self, mock_get: Mock) -> None:
+        """A valid-JSON but non-object response raises GraphQLError."""
+        mock_response = Mock()
+        mock_response.json.return_value = ["unexpected"]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        client = AudiothekClient()
+        client._cache = Mock()
+        client._cache.get.return_value = None
+
+        with pytest.raises(GraphQLError):
+            client._graphql_get("query", {"var": "value"})
+        client._cache.set.assert_not_called()
+
+    @patch('requests.Session.get')
+    def test_download_to_file_cleans_part_on_replace_failure(self, mock_get: Mock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failed os.replace must not leave the .part file behind."""
+        mock_response = Mock()
+        mock_response.iter_content.return_value = [b"img"]
+        mock_get.return_value = mock_response
+
+        def _fail_replace(src, dst):
+            raise OSError("denied")
+
+        monkeypatch.setattr("os.replace", _fail_replace)
+        target = tmp_path / "img.jpg"
+
+        client = AudiothekClient()
+        with pytest.raises(DownloadError):
+            client._download_to_file("http://example.com/img.jpg", str(target))
+
+        assert not (tmp_path / "img.jpg.part").exists()
+        assert not target.exists()
+
+    @patch('requests.Session.get')
+    def test_download_to_file_writes_via_part(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Successful downloads land atomically with no .part residue."""
+        mock_response = Mock()
+        mock_response.iter_content.return_value = [b"chunk1", b"chunk2"]
+        mock_get.return_value = mock_response
+
+        target = tmp_path / "img.jpg"
+        client = AudiothekClient()
+        client._download_to_file("http://example.com/img.jpg", str(target))
+
+        assert target.read_bytes() == b"chunk1chunk2"
+        assert not (tmp_path / "img.jpg.part").exists()
+
+    @patch('requests.Session.get')
     def test_download_to_file_uses_proxy(self, mock_get: Mock) -> None:
         """Test that file downloads use the configured proxy."""
         proxy_url = "http://proxy.example.com:8080"
@@ -105,7 +155,7 @@ class TestAudiothekClient:
 
         # Mock response
         mock_response = Mock()
-        mock_response.content = b"test content"
+        mock_response.iter_content.return_value = [b"test content"]
         mock_get.return_value = mock_response
 
         # Make a file download request

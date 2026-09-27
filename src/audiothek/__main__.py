@@ -155,6 +155,9 @@ def _process_request(request: DownloadRequest) -> int:
         cache_dir=request.cache_dir,
     )
 
+    if request.dry_run and not (request.remove_lower_quality or request.rename_flag or request.cleanup_flag):
+        downloader.logger.warning("--dry-run has no effect for this operation; real changes will be made")
+
     if request.migrate_folders_flag:
         return 0 if migrate_folders(request.folder, downloader, downloader.logger) else 1
 

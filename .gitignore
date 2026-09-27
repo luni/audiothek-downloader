@@ -13,3 +13,5 @@ wheels/
 .DS_Store
 /.coverage
 coverage.xml
+htmlcov/
+mutants/
