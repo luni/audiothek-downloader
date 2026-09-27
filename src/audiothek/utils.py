@@ -42,6 +42,28 @@ def is_valid_resource_id(resource_id: str) -> bool:
     return False
 
 
+def _json_matches_folder_id(file_path: str, first_token: str) -> str | None:
+    """Return the raw resource ID from a metadata JSON matching the folder token."""
+    try:
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    program_set = data.get("programSet")
+    candidates = [data.get("id")]
+    if isinstance(program_set, dict):
+        candidates.append(program_set.get("id"))
+
+    for raw_id in candidates:
+        if raw_id is not None and sanitize_folder_name(str(raw_id)) == first_token:
+            return str(raw_id)
+    return None
+
+
 def get_folder_resource_id(folder_path: str) -> str | None:
     """Recover the original resource ID for an existing output folder.
 
@@ -54,27 +76,10 @@ def get_folder_resource_id(folder_path: str) -> str | None:
     # Prefer IDs stored in JSON metadata files inside the folder.
     try:
         for filename in os.listdir(folder_path):
-            if not filename.endswith(".json"):
-                continue
-            file_path = os.path.join(folder_path, filename)
-            try:
-                with open(file_path, encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, ValueError):
-                continue
-
-            if not isinstance(data, dict):
-                continue
-
-            raw_id = data.get("id")
-            if raw_id is not None and sanitize_folder_name(str(raw_id)) == first_token:
-                return str(raw_id)
-
-            program_set = data.get("programSet") or {}
-            if isinstance(program_set, dict):
-                raw_id = program_set.get("id")
-                if raw_id is not None and sanitize_folder_name(str(raw_id)) == first_token:
-                    return str(raw_id)
+            if filename.endswith(".json"):
+                found = _json_matches_folder_id(os.path.join(folder_path, filename), first_token)
+                if found is not None:
+                    return found
     except OSError:
         pass
 
@@ -174,31 +179,6 @@ def rename_files(folder: str, logger: logging.Logger, dry_run: bool = False) -> 
     logger.info("Starting rename scan in %s%s", folder, " (dry run)" if dry_run else "")
     success = True
 
-    def _rename(old_path: str, new_name: str) -> bool:
-        if not new_name or new_name == os.path.basename(old_path):
-            return True
-        new_path = os.path.join(os.path.dirname(old_path), new_name)
-        if os.path.exists(new_path):
-            # On case-insensitive filesystems the target may be the same file
-            # under different case (e.g. .MP3 -> .mp3); the rename is needed.
-            try:
-                same_file = os.path.samefile(old_path, new_path)
-            except OSError:
-                same_file = False
-            if not same_file:
-                logger.warning("Skipping rename, target already exists: %s -> %s", old_path, new_path)
-                return False
-        if dry_run:
-            logger.info("DRY RUN: Would rename %s -> %s", old_path, new_path)
-            return True
-        try:
-            os.rename(old_path, new_path)
-            logger.info("Renamed: %s -> %s", old_path, new_path)
-            return True
-        except OSError as e:
-            logger.error("Failed to rename %s: %s", old_path, e)
-            return False
-
     # Phase 1: directories, deepest first so renames never break pending paths.
     # Hidden directories (e.g. .git) are skipped entirely.
     dir_paths: list[str] = []
@@ -206,7 +186,7 @@ def rename_files(folder: str, logger: logging.Logger, dry_run: bool = False) -> 
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         dir_paths.extend(os.path.join(dirpath, d) for d in dirnames)
     for dir_path in sorted(dir_paths, key=lambda p: p.count(os.sep), reverse=True):
-        if not _rename(dir_path, sanitize_folder_name(os.path.basename(dir_path))):
+        if not _rename_path(dir_path, sanitize_folder_name(os.path.basename(dir_path)), logger, dry_run):
             success = False
 
     # Phase 2: files. Episode metadata JSON files carry id/title and anchor the
@@ -214,41 +194,80 @@ def rename_files(folder: str, logger: logging.Logger, dry_run: bool = False) -> 
     # share the stem (audio, cover images, the JSON itself).
     for dirpath, dirnames, filenames in os.walk(folder):
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
-        stem_map: dict[str, str] = {}
-        for name in filenames:
-            if name.startswith(".") or not name.lower().endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(dirpath, name), encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, ValueError):
-                continue
-            if not isinstance(data, dict) or "programSet" not in data:
-                continue
-            raw_id = data.get("id")
-            if raw_id is None:
-                continue
-            safe_id = sanitize_folder_name(str(raw_id)) or "episode"
-            stem_map[os.path.splitext(name)[0]] = episode_file_stem(safe_id, str(data.get("title") or safe_id))
-
+        stem_map = _episode_stem_map(dirpath, filenames)
         for name in filenames:
             if name.startswith(".") or name.lower().endswith(TRANSIENT_FILE_SUFFIXES):
                 continue
-            stem, ext = os.path.splitext(name)
-            if stem in stem_map:
-                new_stem = stem_map[stem]
-            elif stem.endswith("_x1") and stem[:-3] in stem_map:
-                new_stem = f"{stem_map[stem[:-3]]}_x1"
-            elif sanitize_folder_name(stem) == stem and ext == ext.lower():
-                # Orphan files with already-valid names are left alone:
-                # renaming them cannot improve download recognition.
+            new_stem = _file_target_stem(name, stem_map)
+            if new_stem is None:
                 continue
-            else:
-                new_stem = sanitize_file_stem(stem)
-            if not _rename(os.path.join(dirpath, name), new_stem + ext.lower()):
+            ext = os.path.splitext(name)[1]
+            if not _rename_path(os.path.join(dirpath, name), new_stem + ext.lower(), logger, dry_run):
                 success = False
 
     return success
+
+
+def _rename_path(old_path: str, new_name: str, logger: logging.Logger, dry_run: bool) -> bool:
+    """Rename one path to a sibling name, never overwriting another file."""
+    if not new_name or new_name == os.path.basename(old_path):
+        return True
+    new_path = os.path.join(os.path.dirname(old_path), new_name)
+    if os.path.exists(new_path):
+        # On case-insensitive filesystems the target may be the same file
+        # under different case (e.g. .MP3 -> .mp3); the rename is needed.
+        try:
+            same_file = os.path.samefile(old_path, new_path)
+        except OSError:
+            same_file = False
+        if not same_file:
+            logger.warning("Skipping rename, target already exists: %s -> %s", old_path, new_path)
+            return False
+    if dry_run:
+        logger.info("DRY RUN: Would rename %s -> %s", old_path, new_path)
+        return True
+    try:
+        os.rename(old_path, new_path)
+        logger.info("Renamed: %s -> %s", old_path, new_path)
+        return True
+    except OSError as e:
+        logger.error("Failed to rename %s: %s", old_path, e)
+        return False
+
+
+def _episode_stem_map(dirpath: str, filenames: list[str]) -> dict[str, str]:
+    """Map each episode-metadata JSON stem to the stem the downloader generates."""
+    stem_map: dict[str, str] = {}
+    for name in filenames:
+        if name.startswith(".") or not name.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(dirpath, name), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or "programSet" not in data:
+            continue
+        raw_id = data.get("id")
+        if raw_id is None:
+            continue
+        safe_id = sanitize_folder_name(str(raw_id)) or "episode"
+        stem_map[os.path.splitext(name)[0]] = episode_file_stem(safe_id, str(data.get("title") or safe_id))
+    return stem_map
+
+
+def _file_target_stem(name: str, stem_map: dict[str, str]) -> str | None:
+    """Return the target stem for a file, or None when it must be left alone."""
+    stem, ext = os.path.splitext(name)
+    if stem in stem_map:
+        return stem_map[stem]
+    if stem.endswith("_x1") and stem[:-3] in stem_map:
+        return f"{stem_map[stem[:-3]]}_x1"
+    if sanitize_folder_name(stem) == stem and ext == ext.lower():
+        # Orphan files with already-valid names are left alone:
+        # renaming them cannot improve download recognition.
+        return None
+    return sanitize_file_stem(stem)
 
 
 def cleanup_files(folder: str, logger: logging.Logger, dry_run: bool = False) -> bool:
@@ -280,28 +299,37 @@ def cleanup_files(folder: str, logger: logging.Logger, dry_run: bool = False) ->
         for name in filenames:
             if name.startswith(".") or not name.lower().endswith(DEAD_FILE_SUFFIXES):
                 continue
-            file_path = os.path.join(dirpath, name)
-            try:
-                age_seconds = time.time() - os.path.getmtime(file_path)
-            except OSError:
+            result = _cleanup_file(os.path.join(dirpath, name), logger, dry_run)
+            if result is None:
                 continue
-            if age_seconds < DEAD_FILE_MIN_AGE_SECONDS:
-                logger.debug("Skipping fresh artifact (possibly in use): %s", file_path)
-                continue
-            if dry_run:
-                logger.info("DRY RUN: Would delete %s", file_path)
+            if result:
                 deleted += 1
-                continue
-            try:
-                os.remove(file_path)
-                deleted += 1
-                logger.debug("Deleted artifact: %s", file_path)
-            except OSError as e:
-                logger.error("Failed to delete %s: %s", file_path, e)
+            else:
                 success = False
 
     logger.info("Cleanup complete. Deleted: %s", deleted)
     return success
+
+
+def _cleanup_file(file_path: str, logger: logging.Logger, dry_run: bool) -> bool | None:
+    """Delete one dead artifact; None when the file must be skipped."""
+    try:
+        age_seconds = time.time() - os.path.getmtime(file_path)
+    except OSError:
+        return None
+    if age_seconds < DEAD_FILE_MIN_AGE_SECONDS:
+        logger.debug("Skipping fresh artifact (possibly in use): %s", file_path)
+        return None
+    if dry_run:
+        logger.info("DRY RUN: Would delete %s", file_path)
+        return True
+    try:
+        os.remove(file_path)
+        logger.debug("Deleted artifact: %s", file_path)
+        return True
+    except OSError as e:
+        logger.error("Failed to delete %s: %s", file_path, e)
+        return False
 
 
 def load_graphql_query(filename: str) -> str:
@@ -352,52 +380,56 @@ def migrate_folders(folder: str, downloader: "AudiothekDownloader", logger: logg
         for item in os.listdir(folder):
             if item.startswith("."):
                 continue
-            item_path = os.path.join(folder, item)
-            if not os.path.isdir(item_path):
-                continue
-
-            # If the folder already follows the new "ID Title" schema, skip it.
-            if " " in item:
-                first_token, title_part = item.split(" ", 1)
-                # Raw URN-style IDs still contain colons and must be migrated.
-                if ":" not in first_token and downloader._program_folder_name(first_token, title_part) == item:
-                    continue
-
-            resource_id = get_folder_resource_id(item_path)
-            if resource_id is None:
-                continue
-
-            resource = downloader.client.determine_resource_type_from_id(resource_id)
-            if resource is None:
-                logger.warning("Could not determine resource type for folder: %s", item)
-                continue
-
-            title = downloader.client.get_title(resource.resource_id, resource.resource_type)
-            sanitized_title = sanitize_folder_name(title) if title else ""
-            if not sanitized_title:
-                logger.warning("Could not get title for folder: %s", item)
+            if _migrate_folder_name(item, folder, downloader, logger) is False:
                 migration_success = False
-                continue
-
-            new_folder_name = downloader._program_folder_name(resource.resource_id, sanitized_title)
-            if new_folder_name == item:
-                continue
-
-            new_folder_path = os.path.join(folder, new_folder_name)
-            if os.path.exists(new_folder_path):
-                logger.warning("Skipping migration, target folder already exists: %s", new_folder_path)
-                migration_success = False
-                continue
-            try:
-                os.rename(item_path, new_folder_path)
-                logger.info("Renamed: %s -> %s", item, new_folder_name)
-            except OSError as e:
-                logger.error("Failed to rename folder %s: %s", item, e)
-                migration_success = False
-
     except Exception as e:
         logger.error("Error while migrating folders: %s", e)
         logger.exception(e)
         return False
 
     return migration_success
+
+
+def _migrate_folder_name(item: str, folder: str, downloader: "AudiothekDownloader", logger: logging.Logger) -> bool | None:
+    """Migrate one folder to the ID+Title scheme; None when nothing to do."""
+    item_path = os.path.join(folder, item)
+    if not os.path.isdir(item_path):
+        return None
+
+    # If the folder already follows the new "ID Title" schema, skip it.
+    if " " in item:
+        first_token, title_part = item.split(" ", 1)
+        # Raw URN-style IDs still contain colons and must be migrated.
+        if ":" not in first_token and downloader._program_folder_name(first_token, title_part) == item:
+            return None
+
+    resource_id = get_folder_resource_id(item_path)
+    if resource_id is None:
+        return None
+
+    resource = downloader.client.determine_resource_type_from_id(resource_id)
+    if resource is None:
+        logger.warning("Could not determine resource type for folder: %s", item)
+        return None
+
+    title = downloader.client.get_title(resource.resource_id, resource.resource_type)
+    sanitized_title = sanitize_folder_name(title) if title else ""
+    if not sanitized_title:
+        logger.warning("Could not get title for folder: %s", item)
+        return False
+
+    new_folder_name = downloader._program_folder_name(resource.resource_id, sanitized_title)
+    if new_folder_name == item:
+        return None
+
+    new_folder_path = os.path.join(folder, new_folder_name)
+    if os.path.exists(new_folder_path):
+        logger.warning("Skipping migration, target folder already exists: %s", new_folder_path)
+        return False
+    try:
+        os.rename(item_path, new_folder_path)
+        logger.info("Renamed: %s -> %s", item, new_folder_name)
+        return True
+    except OSError as e:
+        logger.error("Failed to rename folder %s: %s", item, e)
+        return False

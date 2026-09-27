@@ -49,5 +49,5 @@ mutation:
 	uv run mutmut results
 
 # Validate the code (format + check)
-validate: format check complexity bandit pyright vulture
+validate: format check complexity xenon bandit pyright vulture
 	@echo "Validation passed. Your code is ready to push."
