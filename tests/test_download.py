@@ -503,6 +503,36 @@ def test_save_nodes_preserves_numeric_zero_ids(tmp_path: Path, monkeypatch: pyte
     assert (tmp_path / "0 Zero Program").exists()
 
 
+def test_save_nodes_sanitizes_urn_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """URN IDs with colons/slashes must not appear verbatim in filesystem paths."""
+    downloader = AudiothekDownloader()
+
+    node = {
+        "id": "urn:ard:episode:abc",
+        "title": "Episode",
+        "audios": [{"downloadUrl": "https://example.com/audio.mp3"}],
+        "programSet": {"id": "urn:ard:show:xyz", "title": "Program"},
+    }
+
+    def _mock_requests_get(self, *args, **kwargs):
+        class MockResponse:
+            content = b"audio data"
+
+            def raise_for_status(self):
+                pass
+
+        return MockResponse()
+
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get)
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    # Colons and other path separators should have been replaced
+    program_dir = tmp_path / "urn_ard_show_xyz Program"
+    assert program_dir.exists()
+    assert (program_dir / "Episode_urn_ard_episode_abc.mp3").exists()
+
+
 def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test download_from_id uses base_folder when no folder provided."""
     downloader = AudiothekDownloader("/default/path")
@@ -1229,3 +1259,33 @@ def test_remove_lower_quality_files_with_subdirs(tmp_path: Path, caplog: pytest.
     # Should log starting message
     log_messages = [r.message for r in caplog.records]
     assert any("Starting removal of lower quality files" in msg for msg in log_messages)
+
+
+def test_remove_lower_quality_files_reports_failure_on_removal_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """remove_lower_quality_files must report failure when a file cannot be removed."""
+    subdir = tmp_path / "123456 Program"
+    subdir.mkdir()
+    (subdir / "test.mp3").write_bytes(b"dummy mp3")
+    (subdir / "test.mp4").write_bytes(b"dummy mp4")
+
+    def _mock_get_audio_quality(self, file_path: str) -> int | None:
+        if file_path.endswith(".mp3"):
+            return 128
+        if file_path.endswith(".mp4"):
+            return 96
+        return None
+
+    def _mock_remove(path: str) -> None:
+        if path.endswith(".mp3"):
+            raise OSError("permission denied")
+
+    monkeypatch.setattr(AudiothekDownloader, "_get_audio_quality", _mock_get_audio_quality)
+    monkeypatch.setattr("os.remove", _mock_remove)
+
+    downloader = AudiothekDownloader()
+    result = downloader.remove_lower_quality_files(str(tmp_path))
+
+    assert isinstance(result, DownloadResult)
+    assert result.success is False

@@ -24,7 +24,7 @@ from .file_utils import (
 )
 from .models import DownloadResult, ImageMetadata
 from .parallel import parallel_download_nodes
-from .utils import sanitize_folder_name
+from .utils import get_folder_resource_id, sanitize_folder_name
 
 
 class AudiothekDownloader:
@@ -64,13 +64,16 @@ class AudiothekDownloader:
             programset_title: Program set title
 
         Returns:
-            Folder name with ID and sanitized title
+            Folder name with sanitized ID and title
 
         """
-        sanitized = sanitize_folder_name(programset_title)
-        if sanitized:
-            return f"{programset_id} {sanitized}"
-        return programset_id
+        sanitized_title = sanitize_folder_name(programset_title)
+        if sanitized_title:
+            combined = f"{programset_id} {sanitized_title}"
+        else:
+            combined = programset_id
+        combined = sanitize_folder_name(combined)
+        return combined or "program_set"
 
     @contextmanager
     def _locked_file_operation(self, file_path: str, operation: str) -> Iterator[None]:
@@ -157,30 +160,28 @@ class AudiothekDownloader:
         updated_count = 0
         error_count = 0
 
-        # Find all subdirectories that end with numeric IDs
+        # Find all subdirectories and update them by their stored/original resource ID.
         try:
             for item in os.listdir(target_folder):
                 item_path = os.path.join(target_folder, item)
-                if os.path.isdir(item_path):
-                    # Check if the folder name ends with a numeric ID
-                    if item.isdigit():
-                        self.logger.info("Processing folder: %s", item)
-                        result = self.download_from_id(item, target_folder)
-                        if result.success:
-                            updated_count += 1
-                        else:
-                            error_count += 1
-                    else:
-                        # Try to extract numeric ID from the folder name
-                        match = re.search(r"^(\d+)", item)
-                        if match:
-                            numeric_id = match.group(1)
-                            self.logger.info("Processing folder: %s (ID: %s)", item, numeric_id)
-                            result = self.download_from_id(numeric_id, target_folder)
-                            if result.success:
-                                updated_count += 1
-                            else:
-                                error_count += 1
+                if not os.path.isdir(item_path):
+                    continue
+
+                resource_id = get_folder_resource_id(item_path)
+                if resource_id is None:
+                    continue
+
+                resource = self.client.determine_resource_type_from_id(resource_id)
+                if resource is None:
+                    self.logger.warning("Could not determine resource type for folder: %s", item)
+                    continue
+
+                self.logger.info("Processing folder: %s (ID: %s)", item, resource_id)
+                result = self.download_from_id(resource_id, target_folder)
+                if result.success:
+                    updated_count += 1
+                else:
+                    error_count += 1
         except Exception as e:
             error_msg = f"Error while updating folders: {e}"
             self.logger.error(error_msg)
@@ -189,7 +190,7 @@ class AudiothekDownloader:
                 success=False, message=f"Update partially completed with errors. Updated: {updated_count}, Errors: {error_count + 1}", error=e
             )
 
-        return DownloadResult(success=True, message=f"Update completed. Updated: {updated_count}, Errors: {error_count}")
+        return DownloadResult(success=error_count == 0, message=f"Update completed. Updated: {updated_count}, Errors: {error_count}")
 
     def remove_lower_quality_files(self, folder: str | None = None, dry_run: bool = False) -> DownloadResult:
         """Remove lower quality files when higher quality versions exist.
@@ -233,7 +234,7 @@ class AudiothekDownloader:
             )
 
         action = "Would remove" if dry_run else "Removed"
-        return DownloadResult(success=True, message=f"Quality cleanup completed. {action}: {removed_count}, Errors: {error_count}")
+        return DownloadResult(success=error_count == 0, message=f"Quality cleanup completed. {action}: {removed_count}, Errors: {error_count}")
 
     def _process_folder_quality(self, folder_path: str, dry_run: bool = False) -> dict[str, int]:
         """Process a single folder to remove lower quality files.
@@ -512,7 +513,7 @@ class AudiothekDownloader:
         raw_collection_id = collection_data.get("id")
         if raw_collection_id is None or raw_collection_id == "":
             raw_collection_id = "collection" if is_editorial_collection else "program_set"
-        collection_id = raw_collection_id
+        collection_id = sanitize_folder_name(str(raw_collection_id)) or ("collection" if is_editorial_collection else "program_set")
 
         # Create the output folder if it doesn't exist
         if not ensure_directory_exists(folder, self.logger):
@@ -593,7 +594,7 @@ class AudiothekDownloader:
                 error_count += 1
 
         if error_count > 0:
-            return DownloadResult(success=success_count > 0, message=f"Downloaded {success_count} episodes with {error_count} errors")
+            return DownloadResult(success=False, message=f"Downloaded {success_count} episodes with {error_count} errors")
         return DownloadResult(success=True, message=f"Successfully downloaded {success_count} episodes")
 
     def _process_single_node(self, node: dict[str, Any], folder: str, index: int, total_count: int) -> bool:
@@ -612,18 +613,19 @@ class AudiothekDownloader:
         try:
             raw_node_id = node.get("id")
             node_id = str(raw_node_id if raw_node_id is not None else index)
-            title = node.get("title") or node_id
+            safe_node_id = sanitize_folder_name(node_id) or str(index)
+            title = node.get("title") or safe_node_id
 
             # get title from infos
             array_filename = re.findall(r"(\w+)", title)
-            filename_base = "_".join(array_filename) if array_filename else node_id
-            filename = f"{filename_base}_{node_id}"
+            filename_base = "_".join(array_filename) if array_filename else safe_node_id
+            filename = f"{filename_base}_{safe_node_id}"
 
             # Extract URLs from node
             image_urls = self._extract_image_urls(node)
             audio_urls = self._extract_audio_url(node)
             if not audio_urls:
-                self.logger.warning("No audio URL found for node %s", node_id)
+                self.logger.warning("No audio URL found for node %s", safe_node_id)
                 return False
 
             # Get program information

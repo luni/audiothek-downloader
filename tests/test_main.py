@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from audiothek import AudiothekDownloader
+from audiothek import AudiothekDownloader, DownloadResult
 from audiothek.__main__ import _process_request, main, DownloadRequest
 
 
@@ -661,3 +661,20 @@ def test_argument_parser_includes_dry_run() -> None:
     # Test parsing without --dry-run (default should be False)
     args = parser.parse_args(["--url", "https://example.com"])
     assert args.dry_run is False
+
+
+def test_process_request_returns_zero_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_process_request must return 0 for successful operations."""
+    def _mock_download_from_url(self, url, folder):
+        return DownloadResult(success=True, message="ok")
+
+    monkeypatch.setattr(AudiothekDownloader, "download_from_url", _mock_download_from_url)
+    request = DownloadRequest(url="https://example.com/program/test", folder=str(tmp_path))
+    assert _process_request(request) == 0
+
+
+def test_process_request_returns_one_on_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """_process_request must return 1 when the resource cannot be resolved."""
+    request = DownloadRequest(url="https://invalid.example", folder=str(tmp_path))
+    with caplog.at_level("ERROR"):
+        assert _process_request(request) == 1

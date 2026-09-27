@@ -1,8 +1,12 @@
 """Tests for utility functions."""
 
+import json
+from pathlib import Path
+
 import pytest
 
 from audiothek import sanitize_folder_name
+from audiothek.utils import get_folder_resource_id, is_valid_resource_id
 
 
 def test_sanitize_folder_name_basic() -> None:
@@ -86,3 +90,51 @@ def test_audiothek_downloader_initialization() -> None:
 
     # Test that client session is created
     assert downloader.client._session is not None
+
+
+def test_is_valid_resource_id() -> None:
+    """is_valid_resource_id accepts realistic resource IDs and rejects unrelated tokens."""
+    assert is_valid_resource_id("123456") is True
+    assert is_valid_resource_id("urn:ard:show:xyz") is True
+    assert is_valid_resource_id("ps1") is True
+    assert is_valid_resource_id("") is False
+    assert is_valid_resource_id("   ") is False
+    assert is_valid_resource_id("My") is False
+    assert is_valid_resource_id("Downloads") is False
+    assert is_valid_resource_id("no_numeric") is False
+
+
+def test_get_folder_resource_id_from_metadata(tmp_path: Path) -> None:
+    """Resource IDs are recovered from JSON metadata when present."""
+    folder = tmp_path / "urn_ard_show_xyz Program"
+    folder.mkdir()
+    metadata = {"id": "urn:ard:show:xyz", "title": "Program"}
+    (folder / "urn_ard_show_xyz.json").write_text(json.dumps(metadata))
+
+    assert get_folder_resource_id(str(folder)) == "urn:ard:show:xyz"
+
+
+def test_get_folder_resource_id_from_program_set_in_episode(tmp_path: Path) -> None:
+    """Episode metadata can provide the program set ID used for the folder name."""
+    folder = tmp_path / "ps1 Prog"
+    folder.mkdir()
+    metadata = {"id": "urn:ard:episode:test1", "programSet": {"id": "ps1", "title": "Prog"}}
+    (folder / "episode.json").write_text(json.dumps(metadata))
+
+    assert get_folder_resource_id(str(folder)) == "ps1"
+
+
+def test_get_folder_resource_id_numeric_fallback(tmp_path: Path) -> None:
+    """Legacy numeric folders without metadata fall back to the folder name."""
+    folder = tmp_path / "123456"
+    folder.mkdir()
+
+    assert get_folder_resource_id(str(folder)) == "123456"
+
+
+def test_get_folder_resource_id_ignores_unrelated_folders(tmp_path: Path) -> None:
+    """Folders that do not look like managed download folders are ignored."""
+    folder = tmp_path / "My Downloads"
+    folder.mkdir()
+
+    assert get_folder_resource_id(str(folder)) is None

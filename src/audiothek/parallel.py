@@ -116,5 +116,5 @@ def parallel_download_nodes(
     error_count = len(results) - success_count
 
     if error_count > 0:
-        return DownloadResult(success=success_count > 0, message=f"Downloaded {success_count} episodes with {error_count} errors")
+        return DownloadResult(success=False, message=f"Downloaded {success_count} episodes with {error_count} errors")
     return DownloadResult(success=True, message=f"Successfully downloaded {success_count} episodes")

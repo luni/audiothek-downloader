@@ -298,3 +298,102 @@ def test_migrate_folders_skips_whitespace_only_title(tmp_path: Path, monkeypatch
 
     assert any("Could not get title for folder" in r.message and "123456" in r.message for r in caplog.records)
     assert (tmp_path / "123456").exists()
+
+
+def test_program_folder_name_sanitizes_id() -> None:
+    """Program set IDs (especially URNs) must be sanitized for the filesystem."""
+    assert AudiothekDownloader._program_folder_name("urn:ard:show:abc", "Title") == "urn_ard_show_abc Title"
+    assert AudiothekDownloader._program_folder_name("../../../etc", "Title") == "_.._.._etc Title"
+    assert AudiothekDownloader._program_folder_name("/etc/passwd", "Title") == "_etc_passwd Title"
+
+
+def test_program_folder_name_handles_blank_id() -> None:
+    """A blank or all-dots ID must fall back to a safe default."""
+    assert AudiothekDownloader._program_folder_name("..", "") == "program_set"
+    assert AudiothekDownloader._program_folder_name("", "") == "program_set"
+
+
+def test_update_all_folders_partial_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """update_all_folders must report failure when one folder update fails."""
+    (tmp_path / "123456").mkdir()
+    (tmp_path / "789012").mkdir()
+
+    def _mock_download_from_id(self, resource_id, folder):
+        if resource_id == "123456":
+            return DownloadResult(success=False, message="failed")
+        return DownloadResult(success=True, message="ok")
+
+    monkeypatch.setattr(AudiothekDownloader, "download_from_id", _mock_download_from_id)
+
+    downloader = AudiothekDownloader()
+    result = downloader.update_all_folders(str(tmp_path))
+
+    assert isinstance(result, DownloadResult)
+    assert result.success is False
+    assert "Updated: 1, Errors: 1" in result.message
+
+
+def test_update_all_folders_sanitized_urn_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """update_all_folders resolves sanitized URN folders using metadata."""
+    folder = tmp_path / "urn_ard_show_xyz Program"
+    folder.mkdir()
+    metadata = {"id": "urn:ard:show:xyz", "title": "Program"}
+    (folder / "urn_ard_show_xyz.json").write_text(json.dumps(metadata))
+
+    calls = []
+
+    def _mock_download_from_id(self, resource_id, folder):
+        calls.append(resource_id)
+        return DownloadResult(success=True, message="ok")
+
+    monkeypatch.setattr(AudiothekDownloader, "download_from_id", _mock_download_from_id)
+
+    downloader = AudiothekDownloader()
+    result = downloader.update_all_folders(str(tmp_path))
+
+    assert result.success is True
+    assert calls == ["urn:ard:show:xyz"]
+
+
+def test_migrate_folders_returns_false_on_rename_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """migrate_folders must return False when a rename operation fails."""
+    (tmp_path / "123456").mkdir()
+
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return ResourceInfo("program", resource_id)
+
+    def _mock_get_title(self, resource_id, resource_type):
+        return "Test Program"
+
+    def _mock_rename(old_path, new_path):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
+    monkeypatch.setattr("os.rename", _mock_rename)
+
+    downloader = AudiothekDownloader()
+    assert migrate_folders(str(tmp_path), downloader, downloader.logger) is False
+    assert (tmp_path / "123456").exists()
+
+
+def test_migrate_folders_raw_urn_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """migrate_folders can migrate raw URN folders to sanitized names."""
+    # Colons are valid in Linux filenames, so this simulates a pre-sanitization folder.
+    folder = tmp_path / "urn:ard:show:xyz"
+    folder.mkdir()
+
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return ResourceInfo("program", resource_id)
+
+    def _mock_get_title(self, resource_id, resource_type):
+        return "Test Program"
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
+
+    downloader = AudiothekDownloader()
+    assert migrate_folders(str(tmp_path), downloader, downloader.logger) is True
+
+    assert not folder.exists()
+    assert (tmp_path / "urn_ard_show_xyz Test Program").exists()

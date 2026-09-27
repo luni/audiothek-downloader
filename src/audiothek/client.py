@@ -111,7 +111,7 @@ class AudiothekClient:
             self.logger.error(error_msg)
             raise GraphQLError(query_name or "unknown", variables, error_msg) from e
 
-    def _download_to_file(self, url: str, file_path: str, *, check_status: bool = False) -> None:
+    def _download_to_file(self, url: str, file_path: str, *, check_status: bool = True) -> None:
         """Download content from URL to file.
 
         Args:

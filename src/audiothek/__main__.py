@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import sys
 from dataclasses import dataclass
 
 from audiothek import AudiothekDownloader
@@ -27,8 +28,13 @@ class DownloadRequest:
     max_workers: int = 4
 
 
-def main() -> None:
-    """Parse command line arguments and download episodes from ARD Audiothek."""
+def main() -> int:
+    """Parse command line arguments and download episodes from ARD Audiothek.
+
+    Returns:
+        0 on success, 1 on failure
+
+    """
     parser = argparse.ArgumentParser(description="ARD Audiothek downloader.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -100,7 +106,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    _process_request(
+    return _process_request(
         DownloadRequest(
             url=args.url,
             id=args.id,
@@ -118,14 +124,14 @@ def main() -> None:
     )
 
 
-def _process_request(request: DownloadRequest) -> None:
+def _process_request(request: DownloadRequest) -> int:
     """Parse URL and download episodes from ARD Audiothek.
 
     Args:
         request: The download request configuration
 
     Returns:
-        None
+        0 on success, 1 on failure
 
     """
     downloader = AudiothekDownloader(
@@ -136,16 +142,15 @@ def _process_request(request: DownloadRequest) -> None:
     )
 
     if request.migrate_folders_flag:
-        migrate_folders(request.folder, downloader, downloader.logger)
-        return
+        return 0 if migrate_folders(request.folder, downloader, downloader.logger) else 1
 
     if request.update_folders:
-        downloader.update_all_folders(request.folder)
-        return
+        result = downloader.update_all_folders(request.folder)
+        return 0 if result is not None and result.success else 1
 
     if request.remove_lower_quality:
-        downloader.remove_lower_quality_files(request.folder, dry_run=request.dry_run)
-        return
+        result = downloader.remove_lower_quality_files(request.folder, dry_run=request.dry_run)
+        return 0 if result is not None and result.success else 1
 
     if request.editorial_category_id:
         try:
@@ -160,13 +165,16 @@ def _process_request(request: DownloadRequest) -> None:
                     print(collection)
         except Exception as e:
             downloader.logger.error("Editorial category search failed: %s", e)
-        return
+            return 1
+        return 0
 
     if request.id:
-        downloader.download_from_id(request.id, request.folder)
+        result = downloader.download_from_id(request.id, request.folder)
     else:
-        downloader.download_from_url(request.url, request.folder)
+        result = downloader.download_from_url(request.url, request.folder)
+
+    return 0 if result is not None and result.success else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

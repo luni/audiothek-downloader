@@ -273,8 +273,8 @@ class TestParallelDownloadNodes:
         result = parallel_download_nodes(nodes, process_node)
 
         assert isinstance(result, DownloadResult)
-        # Should have some success since nodes 1 and 3 succeed
-        assert result.success is True
+        # Partial success is still a failure for the overall batch.
+        assert result.success is False
         assert "episodes" in result.message
 
     def test_parallel_download_nodes_all_failure(self) -> None:
@@ -303,7 +303,7 @@ class TestParallelDownloadNodes:
         result = parallel_download_nodes(nodes, process_node)
 
         assert isinstance(result, DownloadResult)
-        assert result.success is True  # Some succeeded
+        assert result.success is False  # Some succeeded, but not all
         assert "episodes" in result.message
 
     def test_parallel_download_nodes_with_custom_logger(self) -> None:
@@ -348,7 +348,7 @@ class TestParallelDownloadNodes:
         result = parallel_download_nodes(nodes, process_node)
 
         assert isinstance(result, DownloadResult)
-        assert result.success is True  # 2 out of 3 succeeded
+        assert result.success is False  # 2 out of 3 succeeded, so the batch failed
         assert result.message == "Downloaded 2 episodes with 1 errors"
 
     def test_parallel_download_nodes_single_success(self) -> None:
@@ -361,7 +361,7 @@ class TestParallelDownloadNodes:
         result = parallel_download_nodes(nodes, process_node)
 
         assert isinstance(result, DownloadResult)
-        assert result.success is True  # At least one succeeded
+        assert result.success is False  # At least one failed
         assert "episodes" in result.message
 
     def test_parallel_download_nodes_counts_returned_results(self) -> None:
@@ -372,7 +372,7 @@ class TestParallelDownloadNodes:
             return node["id"] in ["1", "3"]
 
         result = parallel_download_nodes(nodes, process_node)
-        assert result.success is True
+        assert result.success is False
         assert result.message == "Downloaded 2 episodes with 1 errors"
 
     def test_parallel_download_nodes_message_formatting(self) -> None:
