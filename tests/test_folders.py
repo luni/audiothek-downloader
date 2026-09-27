@@ -10,7 +10,7 @@ import pytest
 
 from audiothek import AudiothekDownloader, DownloadResult, AudiothekClient
 from audiothek.models import ResourceInfo
-from audiothek.utils import migrate_folders
+from audiothek.utils import cleanup_files, migrate_folders, rename_files
 
 
 def test_program_folder_name_sanitizes_whitespace_only_title() -> None:
@@ -397,3 +397,254 @@ def test_migrate_folders_raw_urn_folder(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert not folder.exists()
     assert (tmp_path / "urn_ard_show_xyz Test Program").exists()
+
+
+def _episode_json(path: Path, node_id: str, title: str) -> None:
+    path.write_text(json.dumps({
+        "id": node_id,
+        "title": title,
+        "programSet": {"id": "urn:ard:show:s1", "title": "Show", "path": "/p"},
+    }))
+
+
+def test_rename_files_missing_folder(caplog: pytest.LogCaptureFixture) -> None:
+    """rename_files fails cleanly for a nonexistent directory."""
+    logger = logging.getLogger("test")
+    assert rename_files(str("/nonexistent/path"), logger) is False
+
+
+def test_rename_files_sanitizes_folder_names(tmp_path: Path) -> None:
+    """Folders with invalid characters get renamed to sanitized names."""
+    logger = logging.getLogger("test")
+    bad_dir = tmp_path / "urn:ard:show:xyz My: Show"
+    bad_dir.mkdir()
+    (bad_dir / "ep.mp3").write_bytes(b"audio")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    assert not bad_dir.exists()
+    assert (tmp_path / "urn_ard_show_xyz My_ Show" / "ep.mp3").exists()
+
+
+def test_rename_files_metadata_anchors_episode_names(tmp_path: Path) -> None:
+    """Episode files are renamed to the stem derived from their JSON metadata."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "urn_ard_show_s1 Show"
+    program_dir.mkdir()
+    _episode_json(program_dir / "weird_name.json", "urn:ard:episode:e1", "Real Title")
+    (program_dir / "weird_name.mp3").write_bytes(b"audio")
+    (program_dir / "weird_name.jpg").write_bytes(b"img")
+    (program_dir / "weird_name_x1.jpg").write_bytes(b"img1x1")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    stem = "Real_Title_urn_ard_episode_e1"
+    assert (program_dir / f"{stem}.mp3").exists()
+    assert (program_dir / f"{stem}.json").exists()
+    assert (program_dir / f"{stem}.jpg").exists()
+    assert (program_dir / f"{stem}_x1.jpg").exists()
+    assert not (program_dir / "weird_name.mp3").exists()
+
+
+def test_rename_files_normalizes_invalid_orphan_files(tmp_path: Path) -> None:
+    """Orphan files get renamed only when their name is actually invalid."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    (program_dir / "bad:name.MP3").write_bytes(b"audio")
+    (program_dir / "with spaces.m4a").write_bytes(b"audio")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    # Invalid characters and uppercase extension are fixed.
+    assert (program_dir / "bad_name.mp3").exists()
+    # Valid-but-foreign names are untouched; renaming cannot improve recognition.
+    assert (program_dir / "with spaces.m4a").exists()
+
+
+def test_rename_files_skips_transient_artifacts(tmp_path: Path) -> None:
+    """Lock/backup/partial files are never renamed."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    for name in ("ep.mp3.lock", "ep.mp3.bak", "ep.mp3.part", "ep.json.tmp", "ep.mp3-temp"):
+        (program_dir / name).write_bytes(b"x")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    for name in ("ep.mp3.lock", "ep.mp3.bak", "ep.mp3.part", "ep.json.tmp", "ep.mp3-temp"):
+        assert (program_dir / name).exists()
+
+
+def test_rename_files_leaves_valid_names_alone(tmp_path: Path) -> None:
+    """Files already matching the current scheme are untouched."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    audio = program_dir / "Episode_Title_e1.mp3"
+    audio.write_bytes(b"audio")
+    _episode_json(program_dir / "Episode_Title_e1.json", "e1", "Episode Title")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    assert audio.exists()
+    assert (program_dir / "Episode_Title_e1.json").exists()
+
+
+def test_rename_files_skips_colliding_target(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A rename that would overwrite an existing file is skipped."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    (program_dir / "foo:bar.mp3").write_bytes(b"new")
+    existing = program_dir / "foo_bar.mp3"
+    existing.write_bytes(b"existing")
+
+    with caplog.at_level("WARNING"):
+        assert rename_files(str(tmp_path), logger) is False
+
+    assert existing.read_bytes() == b"existing"
+    assert (program_dir / "foo:bar.mp3").exists()
+    assert any("target already exists" in r.message for r in caplog.records)
+
+
+def test_rename_files_dry_run_changes_nothing(tmp_path: Path) -> None:
+    """Dry run logs renames without modifying the filesystem."""
+    logger = logging.getLogger("test")
+    bad_dir = tmp_path / "urn:ard:show:xyz"
+    bad_dir.mkdir()
+    (bad_dir / "bad:name.mp3").write_bytes(b"audio")
+
+    assert rename_files(str(tmp_path), logger, dry_run=True) is True
+
+    assert bad_dir.exists()
+    assert (bad_dir / "bad:name.mp3").exists()
+
+
+def test_rename_files_skips_hidden_files_and_dirs(tmp_path: Path) -> None:
+    """Dotfiles and hidden directories must not be renamed."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    (program_dir / ".DS_Store").write_bytes(b"junk")
+    hidden_dir = tmp_path / ".hidden:dir"
+    hidden_dir.mkdir()
+    (hidden_dir / "we:ird.mp3").write_bytes(b"audio")
+
+    assert rename_files(str(tmp_path), logger) is True
+
+    assert (program_dir / ".DS_Store").exists()
+    assert hidden_dir.exists()
+    assert (hidden_dir / "we:ird.mp3").exists()
+
+
+def test_migrate_folders_skips_when_target_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """migrate_folders must not clobber an existing folder."""
+    folder = tmp_path / "urn:ard:show:xyz"
+    folder.mkdir()
+    target = tmp_path / "urn_ard_show_xyz Test Program"
+    target.mkdir()
+    (target / "keep.mp3").write_bytes(b"keep")
+
+    def _mock_determine_resource_type_from_id(self, resource_id):
+        return ResourceInfo("program", resource_id)
+
+    def _mock_get_title(self, resource_id, resource_type):
+        return "Test Program"
+
+    monkeypatch.setattr(AudiothekClient, "determine_resource_type_from_id", _mock_determine_resource_type_from_id)
+    monkeypatch.setattr(AudiothekClient, "get_title", _mock_get_title)
+
+    downloader = AudiothekDownloader()
+    with caplog.at_level("WARNING"):
+        assert migrate_folders(str(tmp_path), downloader, downloader.logger) is False
+
+    assert folder.exists()
+    assert (target / "keep.mp3").exists()
+    assert any("target folder already exists" in r.message for r in caplog.records)
+
+
+def test_cleanup_files_deletes_dead_artifacts(tmp_path: Path) -> None:
+    """cleanup_files removes stale locks, parts and temp files."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    content = program_dir / "ep.mp3"
+    content.write_bytes(b"audio")
+    for name in ("ep.mp3.lock", "ep.mp3.part", "ep.json.tmp", "ep.mp3-temp"):
+        (program_dir / name).write_bytes(b"x")
+
+    assert cleanup_files(str(tmp_path), logger) is True
+
+    assert content.exists()
+    for name in ("ep.mp3.lock", "ep.mp3.part", "ep.json.tmp", "ep.mp3-temp"):
+        assert not (program_dir / name).exists()
+
+
+def test_cleanup_files_keeps_bak_and_content(tmp_path: Path) -> None:
+    """cleanup_files must not remove .bak backups or content files."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    for name in ("ep.mp3", "ep.mp3.bak", "ep.json", "ep.jpg"):
+        (program_dir / name).write_bytes(b"x")
+
+    assert cleanup_files(str(tmp_path), logger) is True
+
+    for name in ("ep.mp3", "ep.mp3.bak", "ep.json", "ep.jpg"):
+        assert (program_dir / name).exists()
+
+
+def test_cleanup_files_skips_hidden_entries(tmp_path: Path) -> None:
+    """Dotfiles and hidden directories are never touched."""
+    logger = logging.getLogger("test")
+    program_dir = tmp_path / "ps1 Prog"
+    program_dir.mkdir()
+    (program_dir / ".hidden.lock").write_bytes(b"x")
+    hidden_dir = tmp_path / ".hidden"
+    hidden_dir.mkdir()
+    (hidden_dir / "stale.lock").write_bytes(b"x")
+
+    assert cleanup_files(str(tmp_path), logger) is True
+
+    assert (program_dir / ".hidden.lock").exists()
+    assert (hidden_dir / "stale.lock").exists()
+
+
+def test_cleanup_files_dry_run_deletes_nothing(tmp_path: Path) -> None:
+    """Dry run only logs deletions."""
+    logger = logging.getLogger("test")
+    stale = tmp_path / "ep.mp3.lock"
+    stale.write_bytes(b"x")
+
+    assert cleanup_files(str(tmp_path), logger, dry_run=True) is True
+    assert stale.exists()
+
+
+def test_cleanup_files_missing_folder() -> None:
+    """cleanup_files fails cleanly for a nonexistent directory."""
+    logger = logging.getLogger("test")
+    assert cleanup_files("/nonexistent/path", logger) is False
+
+
+def test_cleanup_files_delete_error_returns_false(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed deletion marks the run as failed but keeps going."""
+    logger = logging.getLogger("test")
+    (tmp_path / "a.lock").write_bytes(b"x")
+    (tmp_path / "b.lock").write_bytes(b"x")
+
+    real_remove = os.remove
+    calls = []
+
+    def _fail_on_a(path):
+        calls.append(path)
+        if path.endswith("a.lock"):
+            raise OSError("denied")
+        return real_remove(path)
+
+    monkeypatch.setattr("os.remove", _fail_on_a)
+
+    assert cleanup_files(str(tmp_path), logger) is False
+    assert len(calls) == 2
+    assert (tmp_path / "a.lock").exists()
+    assert not (tmp_path / "b.lock").exists()

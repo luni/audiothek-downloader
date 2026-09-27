@@ -18,13 +18,16 @@ from .file_utils import (
     backup_file,
     compare_json_content,
     ensure_directory_exists,
+    file_lock_path,
     restore_backup,
     safe_write_json,
     set_file_modification_time,
 )
 from .models import DownloadResult, ImageMetadata
 from .parallel import parallel_download_nodes
-from .utils import get_folder_resource_id, sanitize_folder_name
+from .utils import episode_file_stem, get_folder_resource_id, sanitize_folder_name
+
+AUDIO_FILE_EXTENSIONS = (".mp3", ".mp4", ".aac", ".m4a")
 
 
 class AudiothekDownloader:
@@ -78,8 +81,7 @@ class AudiothekDownloader:
     @contextmanager
     def _locked_file_operation(self, file_path: str, operation: str) -> Iterator[None]:
         """Acquire an inter-process file lock for the duration of an operation."""
-        lock_path = f"{file_path}.lock"
-        lock = FileLock(lock_path, timeout=self.file_lock_timeout)
+        lock = FileLock(file_lock_path(file_path), timeout=self.file_lock_timeout)
         try:
             with lock:
                 yield
@@ -177,7 +179,7 @@ class AudiothekDownloader:
                     continue
 
                 self.logger.info("Processing folder: %s (ID: %s)", item, resource_id)
-                result = self.download_from_id(resource_id, target_folder)
+                result = self.download_from_id(resource.resource_id, target_folder)
                 if result.success:
                     updated_count += 1
                 else:
@@ -251,15 +253,16 @@ class AudiothekDownloader:
         error_count = 0
 
         try:
-            # Group files by base name (without extension)
+            # Group files by base name (without extension). The original
+            # extension spelling is kept as dict key so files that differ only
+            # by case (e.g. "x.MP3" vs "x.mp3") are not silently dropped.
             file_groups: dict[str, dict[str, str]] = {}
             for file in os.listdir(folder_path):
                 file_path = os.path.join(folder_path, file)
                 if os.path.isfile(file_path):
                     base_name, ext = os.path.splitext(file)
-                    ext = ext.lower()
 
-                    if ext in [".mp3", ".mp4", ".aac", ".m4a"]:
+                    if ext.lower() in AUDIO_FILE_EXTENSIONS:
                         if base_name not in file_groups:
                             file_groups[base_name] = {}
                         file_groups[base_name][ext] = file_path
@@ -310,7 +313,7 @@ class AudiothekDownloader:
             quality = self._get_audio_quality(file_path)
             if quality is not None:
                 effective = quality
-                if ext in {".mp4", ".aac", ".m4a"} and quality >= 96:
+                if ext.lower() in {".mp4", ".aac", ".m4a"} and quality >= 96:
                     effective = quality + aac_quality_advantage
                 file_qualities[ext] = {"path": file_path, "bitrate": quality, "effective": effective}
 
@@ -385,7 +388,7 @@ class AudiothekDownloader:
         """
         try:
             node = self.client.get_episode_data(episode_id)
-            if not node:
+            if not node or not isinstance(node, dict):
                 error_msg = f"Episode not found for {episode_id}"
                 self.logger.error(error_msg)
                 return DownloadResult(success=False, message=error_msg)
@@ -453,7 +456,10 @@ class AudiothekDownloader:
                 raw_collection_data = self.client.get_program_set_data(resource_id) or {}
 
             if not nodes:
-                return DownloadResult(success=True, message=f"No episodes found for {'collection' if is_editorial_collection else 'program'} {resource_id}")
+                kind = "collection" if is_editorial_collection else "program"
+                if not raw_collection_data:
+                    return DownloadResult(success=False, message=f"Resource not found: {kind} {resource_id}")
+                return DownloadResult(success=True, message=f"No episodes found for {kind} {resource_id}")
 
             result = self._save_nodes(nodes, folder)
             if nodes and raw_collection_data:
@@ -614,12 +620,9 @@ class AudiothekDownloader:
             raw_node_id = node.get("id")
             node_id = str(raw_node_id if raw_node_id is not None else index)
             safe_node_id = sanitize_folder_name(node_id) or str(index)
-            title = node.get("title") or safe_node_id
+            title = str(node.get("title") or safe_node_id)
 
-            # get title from infos
-            array_filename = re.findall(r"(\w+)", title)
-            filename_base = "_".join(array_filename) if array_filename else safe_node_id
-            filename = f"{filename_base}_{safe_node_id}"
+            filename = episode_file_stem(safe_node_id, title)
 
             # Extract URLs from node
             image_urls = self._extract_image_urls(node)
@@ -867,7 +870,20 @@ class AudiothekDownloader:
         # Check if file exists and is complete
         with self._locked_file_operation(audio_file_path, "write"):
             should_download = True
-            if os.path.exists(audio_file_path):
+            if not os.path.exists(audio_file_path):
+                # A previous download may live under a different extension:
+                # fallback URLs can serve another audio format, and the file is
+                # renamed to match. Size comparison across formats would be
+                # meaningless, so an existing variant is kept as-is.
+                for alt_ext in AUDIO_FILE_EXTENSIONS:
+                    if alt_ext == file_extension:
+                        continue
+                    candidate = os.path.join(program_path, filename + alt_ext)
+                    if os.path.exists(candidate):
+                        self.logger.info("Keeping existing download under alternate extension: %s", candidate)
+                        should_download = False
+                        break
+            if should_download and os.path.exists(audio_file_path):
                 # Check file availability and get content length
                 is_available, expected_length = self.client._check_file_availability(preferred_url)
                 if not is_available:
@@ -907,12 +923,27 @@ class AudiothekDownloader:
                     should_download = False
 
             if should_download:
-                download_success = self.client._download_audio_to_file(
+                successful_url = self.client._download_audio_to_file(
                     preferred_url,
                     audio_file_path,
                     fallback_urls=fallback_urls,
                 )
-                if download_success:
+                if successful_url:
+                    # The serving URL may have a different audio format than the
+                    # preferred one; correct the extension so it matches content.
+                    if isinstance(successful_url, str):
+                        actual_extension = self._get_audio_file_extension(successful_url)
+                        if actual_extension != file_extension:
+                            corrected_path = os.path.join(program_path, filename + actual_extension)
+                            if os.path.exists(corrected_path):
+                                self.logger.warning("Keeping %s: extension-corrected target already exists: %s", audio_file_path, corrected_path)
+                            else:
+                                try:
+                                    os.replace(audio_file_path, corrected_path)
+                                    self.logger.info("Saved as %s (served format differs from preferred URL)", corrected_path)
+                                    audio_file_path = corrected_path
+                                except OSError as e:
+                                    self.logger.error("Failed to rename downloaded file %s: %s", audio_file_path, e)
                     # Set file modification time to publish date if available
                     if publish_date:
                         set_file_modification_time(audio_file_path, publish_date, self.logger)

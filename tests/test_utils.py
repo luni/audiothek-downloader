@@ -62,6 +62,13 @@ def test_sanitize_folder_name_very_long() -> None:
     assert len(result) <= 255
 
 
+def test_sanitize_folder_name_truncation_strips_trailing_dot() -> None:
+    """Truncation must not leave a trailing dot or space (illegal on Windows)."""
+    result = sanitize_folder_name("a" * 99 + ".extra")
+    assert len(result) <= 100
+    assert not result.endswith((".", " "))
+
+
 def test_sanitize_folder_name_edge_cases() -> None:
     """Test edge cases for folder name sanitization."""
     # Only special characters

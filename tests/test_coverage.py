@@ -48,7 +48,9 @@ def test_find_program_sets_by_editorial_category_id_pagination(tmp_path: Path, m
     assert len(result) == 3
     assert len(calls) == 2
     assert calls[0]["offset"] == 0
-    assert calls[1]["offset"] == 24
+    # Offset advances by the number of nodes actually returned, not the
+    # requested count, so a short page cannot skip records.
+    assert calls[1]["offset"] == 2
 
 
 def test_find_editorial_collections_by_editorial_category_id_breaks_on_no_sections(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

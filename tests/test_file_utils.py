@@ -305,6 +305,31 @@ class TestSafeWriteJson:
         assert result.success is False
         assert lock_file.exists()
 
+    def test_safe_write_json_atomic_via_tmp_file(self, tmp_path: Path) -> None:
+        """Writes go through a .tmp file that is atomically renamed into place."""
+        mock_logger = Mock()
+        test_file = tmp_path / "test.json"
+
+        with patch("audiothek.file_utils.os.replace", wraps=os.replace) as mock_replace:
+            result = safe_write_json(str(test_file), {"key": "value"}, mock_logger)
+
+        assert result.success is True
+        mock_replace.assert_called_once_with(f"{test_file}.tmp", str(test_file))
+        assert not (tmp_path / "test.json.tmp").exists()
+
+    def test_safe_write_json_cleans_tmp_on_replace_failure(self, tmp_path: Path) -> None:
+        """A failed rename removes the temp file and keeps the original intact."""
+        mock_logger = Mock()
+        test_file = tmp_path / "test.json"
+        test_file.write_text('{"old": true}')
+
+        with patch("audiothek.file_utils.os.replace", side_effect=OSError("boom")):
+            result = safe_write_json(str(test_file), {"new": 1}, mock_logger)
+
+        assert result.success is False
+        assert not (tmp_path / "test.json.tmp").exists()
+        assert json.loads(test_file.read_text()) == {"old": True}
+
 
 class TestSetFileModificationTime:
     """Test cases for set_file_modification_time function."""
@@ -356,6 +381,17 @@ class TestSetFileModificationTime:
         publish_date = "invalid-date"
 
         result = set_file_modification_time(str(test_file), publish_date, mock_logger)
+
+        assert result is False
+        mock_logger.warning.assert_called_once()
+
+    def test_set_file_modification_time_non_string_date(self, tmp_path: Path) -> None:
+        """Non-string publish dates must fail gracefully instead of raising."""
+        mock_logger = Mock()
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+
+        result = set_file_modification_time(str(test_file), 12345, mock_logger)
 
         assert result is False
         mock_logger.warning.assert_called_once()

@@ -56,7 +56,8 @@ def test_download_collection_paginates_and_writes(tmp_path: Path, mock_requests_
     calls = [c for c in graphql_mock.calls if c["operation"] == "ProgramSetEpisodesQuery"]
     assert len(calls) == 3  # 2 for pagination + 1 for program set metadata
     assert calls[0]["variables"]["offset"] == 0
-    assert calls[1]["variables"]["offset"] == 24
+    # Offset advances by nodes actually returned (2), not requested count.
+    assert calls[1]["variables"]["offset"] == 2
 
 
 def test_save_nodes_skips_when_no_audio(tmp_path: Path, mock_requests_get: object) -> None:
@@ -161,7 +162,7 @@ def test_save_nodes_does_not_redownload_existing_files(tmp_path: Path, monkeypat
 
     calls: list[str] = []
 
-    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         calls.append(f"GET:{url}")
 
         class _Resp:
@@ -221,7 +222,7 @@ def test_save_nodes_redownloads_incomplete_files(tmp_path: Path, monkeypatch: py
 
     calls: list[str] = []
 
-    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         calls.append(f"GET:{url}")
 
         class _Resp:
@@ -285,7 +286,7 @@ def test_save_nodes_skips_smaller_files(tmp_path: Path, monkeypatch: pytest.Monk
 
     calls: list[str] = []
 
-    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         calls.append(f"GET:{url}")
 
         class _Resp:
@@ -348,7 +349,7 @@ def test_save_nodes_keeps_existing_file_when_no_content_length(tmp_path: Path, m
 
     calls: list[str] = []
 
-    def _get(self, url: str, params: dict | None = None, timeout: int | None = None):
+    def _get(self, url: str, params: dict | None = None, timeout: int | None = None, **kwargs: Any):
         calls.append(f"GET:{url}")
 
         class _Resp:
@@ -531,6 +532,48 @@ def test_save_nodes_sanitizes_urn_ids(tmp_path: Path, monkeypatch: pytest.Monkey
     program_dir = tmp_path / "urn_ard_show_xyz Program"
     assert program_dir.exists()
     assert (program_dir / "Episode_urn_ard_episode_abc.mp3").exists()
+
+
+def test_save_nodes_caps_filename_bytes_for_long_unicode_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A node ID that is itself near the byte limit must not overflow the filename."""
+    downloader = AudiothekDownloader()
+
+    node = {
+        "id": "ü" * 100,  # 200 bytes in UTF-8
+        "title": "T",
+        "audios": [{"downloadUrl": "https://example.com/audio.mp3"}],
+        "programSet": {"id": "ps1", "title": "Prog"},
+    }
+
+    def _mock_requests_get(self, *args, **kwargs):
+        class MockResponse:
+            content = b"audio data"
+
+            def raise_for_status(self):
+                pass
+
+        return MockResponse()
+
+    monkeypatch.setattr("requests.Session.get", _mock_requests_get)
+
+    downloader._save_nodes([node], str(tmp_path))
+
+    program_dir = tmp_path / "ps1 Prog"
+    mp3_files = [p for p in program_dir.iterdir() if p.suffix == ".mp3"]
+    assert len(mp3_files) == 1
+    assert len(mp3_files[0].stem.encode("utf-8")) <= 200
+    assert len(mp3_files[0].name.encode("utf-8")) <= 255
+
+
+def test_download_single_episode_non_dict_node_returns_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A malformed (non-dict) episode node must fail cleanly, not crash."""
+    downloader = AudiothekDownloader()
+    monkeypatch.setattr(downloader.client, "get_episode_data", lambda episode_id: "not-a-dict")
+
+    result = downloader._download_single_episode("urn:ard:episode:x", str(tmp_path))
+
+    assert result.success is False
+    assert "Episode not found" in result.message
 
 
 def test_download_from_id_with_base_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -949,6 +992,65 @@ def test_save_audio_file_skips_download_on_404_check(tmp_path: Path, monkeypatch
     # Original file should remain unchanged
     assert original_file.exists()
     assert original_file.read_bytes() == b"original content"
+
+
+def test_save_audio_file_skips_download_when_alternate_extension_exists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A file renamed to a fallback format's extension must not be re-downloaded."""
+    downloader = AudiothekDownloader()
+    program_dir = tmp_path / "test_program"
+    program_dir.mkdir()
+    existing = program_dir / "test_audio.aac"
+    existing.write_bytes(b"existing aac content")
+
+    download_calls = []
+
+    def _mock_download_audio_file(url: str, file_path: str, **kwargs: Any) -> str:
+        download_calls.append(url)
+        return url
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+
+    result = downloader._save_audio_file(
+        ["https://example.com/audio.mp3", "https://example.com/audio.aac"],
+        "test_audio",
+        str(program_dir),
+        1,
+        1,
+    )
+
+    assert result is True
+    assert download_calls == []
+    assert existing.read_bytes() == b"existing aac content"
+
+
+def test_save_audio_file_does_not_overwrite_existing_corrected_extension(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Extension correction must not clobber an already-existing target file."""
+    downloader = AudiothekDownloader()
+    program_dir = tmp_path / "test_program"
+    program_dir.mkdir()
+
+    def _mock_download_audio_file(url: str, file_path: str, **kwargs: Any) -> str:
+        # Simulate a concurrent/pre-existing corrected-extension file appearing
+        # between the existence check and the rename.
+        (program_dir / "test_audio.aac").write_bytes(b"pre-existing aac")
+        Path(file_path).write_bytes(b"fresh audio")
+        return "https://example.com/audio.aac"
+
+    monkeypatch.setattr(downloader.client, "_download_audio_to_file", _mock_download_audio_file)
+
+    with caplog.at_level("WARNING"):
+        result = downloader._save_audio_file(
+            ["https://example.com/audio.mp3"],
+            "test_audio",
+            str(program_dir),
+            1,
+            1,
+        )
+
+    assert result is True
+    assert (program_dir / "test_audio.aac").read_bytes() == b"pre-existing aac"
+    assert (program_dir / "test_audio.mp3").read_bytes() == b"fresh audio"
+    assert any("extension-corrected target already exists" in r.message for r in caplog.records)
     # No backup should be created
     assert not (program_dir / "test_audio.mp3.bak").exists()
 
@@ -960,7 +1062,7 @@ def test_download_audio_file_uses_fallback_on_404(tmp_path: Path, monkeypatch: p
 
     call_count = 0
 
-    def _mock_get(self, url: str, timeout: int | None = None):
+    def _mock_get(self, url: str, timeout: int | None = None, **kwargs: Any):
         nonlocal call_count
         call_count += 1
 
@@ -984,7 +1086,7 @@ def test_download_audio_file_uses_fallback_on_404(tmp_path: Path, monkeypatch: p
         audio_file_path = tmp_path / "test.mp3"
         result = client._download_audio_to_file("https://example.com/primary.mp3", str(audio_file_path), "https://example.com/fallback.mp3")
 
-    assert result is True
+    assert result == "https://example.com/fallback.mp3"
     assert audio_file_path.exists()
     assert audio_file_path.read_bytes() == b"valid audio content"
 
@@ -1101,6 +1203,27 @@ def test_compare_and_remove_files_prefers_high_bitrate_mp3_over_low_aac(tmp_path
     assert result["removed"] == 1
     assert mp3_file.exists()
     assert not m4a_file.exists()
+
+
+def test_process_folder_quality_mixed_case_extensions(tmp_path: Path) -> None:
+    """Files differing only by extension case must both enter the comparison."""
+    downloader = AudiothekDownloader()
+    test_dir = tmp_path / "folder"
+    test_dir.mkdir()
+    upper = test_dir / "episode.MP3"
+    lower = test_dir / "episode.mp3"
+    upper.write_bytes(b"high quality")
+    lower.write_bytes(b"low quality")
+
+    def mock_get_quality(file_path: str) -> int | None:
+        return 320 if file_path.endswith(".MP3") else 128
+
+    downloader._get_audio_quality = mock_get_quality
+    result = downloader._process_folder_quality(str(test_dir))
+
+    assert result["removed"] == 1
+    assert upper.exists()
+    assert not lower.exists()
 
 
 def test_remove_lower_quality_files_dry_run(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:

@@ -63,6 +63,41 @@ class TestAudiothekClient:
         assert client._session.proxies == {"http": proxy_url, "https": proxy_url}
 
     @patch('requests.Session.get')
+    def test_graphql_get_does_not_cache_error_responses(self, mock_get: Mock) -> None:
+        """GraphQL error payloads must not be written to the cache."""
+        mock_response = Mock()
+        mock_response.json.return_value = {"errors": [{"message": "boom"}]}
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        client = AudiothekClient()
+        client._cache = Mock()
+        client._cache.get.return_value = None
+
+        data = client._graphql_get("query", {"var": "value"})
+
+        assert data == {"errors": [{"message": "boom"}]}
+        client._cache.set.assert_not_called()
+
+    @patch('requests.Session.get')
+    def test_graphql_get_caches_success_responses(self, mock_get: Mock) -> None:
+        """Successful GraphQL payloads are cached."""
+        payload = {"data": {"result": {"id": "1"}}}
+        mock_response = Mock()
+        mock_response.json.return_value = payload
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        client = AudiothekClient()
+        client._cache = Mock()
+        client._cache.get.return_value = None
+
+        data = client._graphql_get("query", {"var": "value"})
+
+        assert data == payload
+        client._cache.set.assert_called_once()
+
+    @patch('requests.Session.get')
     def test_download_to_file_uses_proxy(self, mock_get: Mock) -> None:
         """Test that file downloads use the configured proxy."""
         proxy_url = "http://proxy.example.com:8080"
@@ -387,22 +422,25 @@ class TestAudiothekClient:
         mock_episode_title.assert_not_called()
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_success(self, mock_get: Mock) -> None:
-        """Test successful audio fetch and validation."""
+    def test_stream_audio_to_file_success(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Test successful audio streaming to file."""
         mock_response = Mock()
-        mock_response.content = b"valid audio content" * 1000  # Large enough to pass validation
+        mock_response.iter_content.return_value = [b"valid audio content" * 1000]  # Large enough to pass validation
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result == b"valid audio content" * 1000
-        mock_get.assert_called_once_with("http://example.com/audio.mp3", timeout=30)
+        assert result is True
+        assert target.read_bytes() == b"valid audio content" * 1000
+        assert not (tmp_path / "audio.mp3.part").exists()
+        mock_get.assert_called_once_with("http://example.com/audio.mp3", timeout=30, stream=True)
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_404(self, mock_get: Mock) -> None:
-        """Test audio fetch with 404 error."""
+    def test_stream_audio_to_file_404(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Test audio streaming with 404 error."""
         mock_response = Mock()
         mock_response.status_code = 404
         error = requests.HTTPError("404 Not Found")
@@ -410,13 +448,15 @@ class TestAudiothekClient:
         mock_get.side_effect = error
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result is None
+        assert result is False
+        assert not target.exists()
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_http_error(self, mock_get: Mock) -> None:
-        """Test audio fetch with non-404 HTTP error."""
+    def test_stream_audio_to_file_http_error(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Test audio streaming with non-404 HTTP error."""
         mock_response = Mock()
         mock_response.status_code = 500
         error = requests.HTTPError("500 Server Error")
@@ -426,53 +466,60 @@ class TestAudiothekClient:
         client = AudiothekClient()
 
         with pytest.raises(DownloadError):
-            client._fetch_and_validate_audio("http://example.com/audio.mp3")
+            client._stream_audio_to_file("http://example.com/audio.mp3", str(tmp_path / "audio.mp3"))
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_small_error_response(self, mock_get: Mock) -> None:
-        """Test audio fetch with small error response."""
+    def test_stream_audio_to_file_small_error_response(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Test audio streaming with small error response."""
         mock_response = Mock()
-        mock_response.content = b"error: file not found"
+        mock_response.iter_content.return_value = [b"error: file not found"]
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result is None
+        assert result is False
+        assert not target.exists()
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_small_valid_response(self, mock_get: Mock) -> None:
-        """Test audio fetch with small but valid response."""
+    def test_stream_audio_to_file_small_valid_response(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Test audio streaming with small but valid response."""
         mock_response = Mock()
-        mock_response.content = b"valid audio content but small"
+        mock_response.iter_content.return_value = [b"valid audio content but small"]
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result == b"valid audio content but small"
+        assert result is True
+        assert target.read_bytes() == b"valid audio content but small"
 
     @patch('requests.Session.get')
-    def test_fetch_and_validate_audio_empty_response(self, mock_get: Mock) -> None:
+    def test_stream_audio_to_file_empty_response(self, mock_get: Mock, tmp_path: Path) -> None:
         """An empty response body must be treated as unavailable audio."""
         mock_response = Mock()
+        mock_response.iter_content.return_value = []
         mock_response.content = b""
         mock_response.raise_for_status.return_value = None
         mock_get.return_value = mock_response
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result is None
+        assert result is False
+        assert not target.exists()
 
     @patch("audiothek.client.time.sleep")
     @patch("requests.Session.get")
-    def test_fetch_and_validate_audio_retries_incomplete_read_then_succeeds(self, mock_get: Mock, mock_sleep: Mock) -> None:
+    def test_stream_audio_to_file_retries_incomplete_read_then_succeeds(self, mock_get: Mock, mock_sleep: Mock, tmp_path: Path) -> None:
         """Retry same URL on transient incomplete-read errors."""
         mock_response = Mock()
-        mock_response.content = b"valid audio content" * 1000
+        mock_response.iter_content.return_value = [b"valid audio content" * 1000]
         mock_response.raise_for_status.return_value = None
 
         incomplete_error = requests.ConnectionError(
@@ -481,15 +528,17 @@ class TestAudiothekClient:
         mock_get.side_effect = [incomplete_error, mock_response]
 
         client = AudiothekClient()
-        result = client._fetch_and_validate_audio("http://example.com/audio.mp3")
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
 
-        assert result == b"valid audio content" * 1000
+        assert result is True
+        assert target.read_bytes() == b"valid audio content" * 1000
         assert mock_get.call_count == 2
         mock_sleep.assert_called_once_with(0.5)
 
     @patch("audiothek.client.time.sleep")
     @patch("requests.Session.get")
-    def test_fetch_and_validate_audio_incomplete_read_exhausted(self, mock_get: Mock, mock_sleep: Mock) -> None:
+    def test_stream_audio_to_file_incomplete_read_exhausted(self, mock_get: Mock, mock_sleep: Mock, tmp_path: Path) -> None:
         """Raise DownloadError after exhausting retry attempts for incomplete reads."""
         incomplete_error = requests.ConnectionError(
             "Connection broken: IncompleteRead(16777216 bytes read, 52616056 more expected)"
@@ -498,89 +547,106 @@ class TestAudiothekClient:
 
         client = AudiothekClient()
         with pytest.raises(DownloadError):
-            client._fetch_and_validate_audio("http://example.com/audio.mp3")
+            client._stream_audio_to_file("http://example.com/audio.mp3", str(tmp_path / "audio.mp3"))
 
         assert mock_get.call_count == 3
         assert mock_sleep.call_count == 2
 
-    @patch.object(AudiothekClient, '_fetch_and_validate_audio')
-    @patch('builtins.open', create=True)
-    def test_download_audio_to_file_success(self, mock_open: Mock, mock_fetch: Mock) -> None:
+    @patch("audiothek.client.os.replace")
+    @patch('requests.Session.get')
+    def test_stream_audio_to_file_replace_failure_removes_part_file(self, mock_get: Mock, mock_replace: Mock, tmp_path: Path) -> None:
+        """A failed atomic rename must not leave a stale .part file behind."""
+        mock_response = Mock()
+        mock_response.iter_content.return_value = [b"valid audio content" * 1000]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+        mock_replace.side_effect = OSError("rename failed")
+
+        client = AudiothekClient()
+        target = tmp_path / "audio.mp3"
+
+        with pytest.raises(OSError, match="rename failed"):
+            client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
+
+        assert not target.exists()
+        assert not Path(f"{target}.part").exists()
+
+    @patch('requests.Session.get')
+    def test_stream_audio_to_file_leaves_no_part_file_on_failure(self, mock_get: Mock, tmp_path: Path) -> None:
+        """Failure paths must never leave a .part file behind."""
+        mock_response = Mock()
+        mock_response.iter_content.return_value = [b"error: not found"]
+        mock_response.raise_for_status.return_value = None
+        mock_get.return_value = mock_response
+
+        client = AudiothekClient()
+        target = tmp_path / "audio.mp3"
+        result = client._stream_audio_to_file("http://example.com/audio.mp3", str(target))
+
+        assert result is False
+        assert not Path(f"{target}.part").exists()
+
+    @patch.object(AudiothekClient, '_stream_audio_to_file')
+    def test_download_audio_to_file_success(self, mock_stream: Mock) -> None:
         """Test successful audio download to file."""
-        mock_fetch.return_value = b"audio content"
-        mock_file = Mock()
-        mock_open.return_value.__enter__.return_value = mock_file
+        mock_stream.return_value = True
 
         client = AudiothekClient()
         result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3")
 
-        assert result is True
-        mock_fetch.assert_called_once_with("http://example.com/audio.mp3")
-        mock_file.write.assert_called_once_with(b"audio content")
+        assert result == "http://example.com/audio.mp3"
+        mock_stream.assert_called_once_with("http://example.com/audio.mp3", "/tmp/audio.mp3")
 
-    @patch.object(AudiothekClient, '_fetch_and_validate_audio')
-    def test_download_audio_to_file_404_with_fallback(self, mock_fetch: Mock) -> None:
+    @patch.object(AudiothekClient, '_stream_audio_to_file')
+    def test_download_audio_to_file_404_with_fallback(self, mock_stream: Mock) -> None:
         """Test audio download with 404 and successful fallback."""
-        mock_fetch.side_effect = [None, b"fallback content"]
+        mock_stream.side_effect = [False, True]
 
-        with patch('builtins.open', create=True) as mock_open:
-            mock_file = Mock()
-            mock_open.return_value.__enter__.return_value = mock_file
+        client = AudiothekClient()
+        result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3", "http://example.com/fallback.mp3")
 
-            client = AudiothekClient()
-            result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3", "http://example.com/fallback.mp3")
+        assert result == "http://example.com/fallback.mp3"
+        assert mock_stream.call_count == 2
+        mock_stream.assert_any_call("http://example.com/audio.mp3", "/tmp/audio.mp3")
+        mock_stream.assert_any_call("http://example.com/fallback.mp3", "/tmp/audio.mp3")
 
-            assert result is True
-            assert mock_fetch.call_count == 2
-            mock_fetch.assert_any_call("http://example.com/audio.mp3")
-            mock_fetch.assert_any_call("http://example.com/fallback.mp3")
-            mock_file.write.assert_called_once_with(b"fallback content")
-
-    @patch.object(AudiothekClient, '_fetch_and_validate_audio')
-    def test_download_audio_to_file_both_fail(self, mock_fetch: Mock) -> None:
+    @patch.object(AudiothekClient, '_stream_audio_to_file')
+    def test_download_audio_to_file_both_fail(self, mock_stream: Mock) -> None:
         """Test audio download when both primary and fallback fail."""
-        mock_fetch.return_value = None
+        mock_stream.return_value = False
 
         client = AudiothekClient()
         result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3", "http://example.com/fallback.mp3")
 
-        assert result is False
-        assert mock_fetch.call_count == 2
+        assert result is None
+        assert mock_stream.call_count == 2
 
-    @patch.object(AudiothekClient, '_fetch_and_validate_audio')
-    def test_download_audio_to_file_fallback_exception(self, mock_fetch: Mock) -> None:
+    @patch.object(AudiothekClient, '_stream_audio_to_file')
+    def test_download_audio_to_file_fallback_exception(self, mock_stream: Mock) -> None:
         """Test audio download when fallback throws exception."""
-        mock_fetch.side_effect = [None, Exception("Network error")]
+        mock_stream.side_effect = [False, Exception("Network error")]
 
         client = AudiothekClient()
         result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3", "http://example.com/fallback.mp3")
 
-        assert result is False
-        assert mock_fetch.call_count == 2
+        assert result is None
+        assert mock_stream.call_count == 2
 
-    @patch.object(AudiothekClient, '_fetch_and_validate_audio')
-    def test_download_audio_to_file_no_fallback(self, mock_fetch: Mock) -> None:
+    @patch.object(AudiothekClient, '_stream_audio_to_file')
+    def test_download_audio_to_file_no_fallback(self, mock_stream: Mock) -> None:
         """Test audio download without fallback URL."""
-        mock_fetch.return_value = b"audio content"
+        mock_stream.return_value = True
 
-        with patch('builtins.open', create=True) as mock_open:
-            mock_file = Mock()
-            mock_open.return_value.__enter__.return_value = mock_file
+        client = AudiothekClient()
+        result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3")
 
-            client = AudiothekClient()
-            result = client._download_audio_to_file("http://example.com/audio.mp3", "/tmp/audio.mp3")
+        assert result == "http://example.com/audio.mp3"
+        mock_stream.assert_called_once_with("http://example.com/audio.mp3", "/tmp/audio.mp3")
 
-            assert result is True
-            mock_fetch.assert_called_once_with("http://example.com/audio.mp3")
-            mock_file.write.assert_called_once_with(b"audio content")
-
-    @patch.object(AudiothekClient, "_fetch_and_validate_audio")
-    @patch("builtins.open", create=True)
-    def test_download_audio_to_file_retries_all_fallback_urls(self, mock_open: Mock, mock_fetch: Mock) -> None:
+    @patch.object(AudiothekClient, "_stream_audio_to_file")
+    def test_download_audio_to_file_retries_all_fallback_urls(self, mock_stream: Mock) -> None:
         """Test audio download retries through ordered fallback URL list."""
-        mock_fetch.side_effect = [None, None, b"third source content"]
-        mock_file = Mock()
-        mock_open.return_value.__enter__.return_value = mock_file
+        mock_stream.side_effect = [False, False, True]
 
         client = AudiothekClient()
         result = client._download_audio_to_file(
@@ -592,17 +658,16 @@ class TestAudiothekClient:
             ],
         )
 
-        assert result is True
-        assert mock_fetch.call_count == 3
-        mock_fetch.assert_any_call("http://example.com/audio.mp3")
-        mock_fetch.assert_any_call("http://example.com/fallback-1.mp3")
-        mock_fetch.assert_any_call("http://example.com/fallback-2.mp3")
-        mock_file.write.assert_called_once_with(b"third source content")
+        assert result == "http://example.com/fallback-2.mp3"
+        assert mock_stream.call_count == 3
+        mock_stream.assert_any_call("http://example.com/audio.mp3", "/tmp/audio.mp3")
+        mock_stream.assert_any_call("http://example.com/fallback-1.mp3", "/tmp/audio.mp3")
+        mock_stream.assert_any_call("http://example.com/fallback-2.mp3", "/tmp/audio.mp3")
 
-    @patch.object(AudiothekClient, "_fetch_and_validate_audio")
-    def test_download_audio_to_file_all_candidates_fail(self, mock_fetch: Mock) -> None:
-        """Test audio download returns False when all URL candidates fail."""
-        mock_fetch.return_value = None
+    @patch.object(AudiothekClient, "_stream_audio_to_file")
+    def test_download_audio_to_file_all_candidates_fail(self, mock_stream: Mock) -> None:
+        """Test audio download returns None when all URL candidates fail."""
+        mock_stream.return_value = False
 
         client = AudiothekClient()
         result = client._download_audio_to_file(
@@ -611,8 +676,8 @@ class TestAudiothekClient:
             fallback_urls=["http://example.com/fallback-1.mp3", "http://example.com/fallback-2.mp3"],
         )
 
-        assert result is False
-        assert mock_fetch.call_count == 3
+        assert result is None
+        assert mock_stream.call_count == 3
 
 
 @patch.object(AudiothekClient, "_graphql_get")

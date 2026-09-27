@@ -50,8 +50,14 @@ class GraphQLCache:
         self.ttl_seconds = max(0, int(ttl_seconds)) if self._enabled else 0
         self._lock = threading.Lock()
         if self.ttl_seconds > 0:
-            ensure_directory_exists(str(base_dir), self.logger)
-            self._initialize_database()
+            try:
+                if ensure_directory_exists(str(base_dir), self.logger):
+                    self._initialize_database()
+                else:
+                    self.ttl_seconds = 0
+            except (OSError, sqlite3.Error) as e:
+                self.logger.warning("GraphQL cache disabled, database unavailable: %s", e)
+                self.ttl_seconds = 0
 
     @staticmethod
     def _resolve_cache_dir(cache_dir: str | os.PathLike[str] | None) -> Path:
@@ -98,28 +104,32 @@ class GraphQLCache:
             return None
 
         cache_key = self._build_cache_key(query, variables)
-        with self._lock:
-            with self._connect() as conn:
-                row = conn.execute(
-                    "SELECT response, updated_at FROM graphql_cache WHERE cache_key = ?",
-                    (cache_key,),
-                ).fetchone()
+        try:
+            with self._lock:
+                with self._connect() as conn:
+                    row = conn.execute(
+                        "SELECT response, updated_at FROM graphql_cache WHERE cache_key = ?",
+                        (cache_key,),
+                    ).fetchone()
 
-                if not row:
-                    return None
+                    if not row:
+                        return None
 
-                updated_at = float(row[1])
-                if time.time() - updated_at > self.ttl_seconds:
-                    conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
-                    conn.commit()
-                    return None
+                    updated_at = float(row[1])
+                    if time.time() - updated_at > self.ttl_seconds:
+                        conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
+                        conn.commit()
+                        return None
 
-                try:
-                    return json.loads(row[0])
-                except json.JSONDecodeError:
-                    conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
-                    conn.commit()
-                    return None
+                    try:
+                        return json.loads(row[0])
+                    except json.JSONDecodeError:
+                        conn.execute("DELETE FROM graphql_cache WHERE cache_key = ?", (cache_key,))
+                        conn.commit()
+                        return None
+        except (OSError, sqlite3.Error) as e:
+            self.logger.debug("Cache lookup failed, continuing uncached: %s", e)
+            return None
 
     def set(self, query: str, variables: dict[str, Any], response: dict[str, Any], query_name: str = "") -> None:
         """Persist a GraphQL response in the cache."""
@@ -130,30 +140,36 @@ class GraphQLCache:
         payload = json.dumps(response, separators=(",", ":"), ensure_ascii=False)
         timestamp = time.time()
 
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO graphql_cache(cache_key, query_name, query, variables, response, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(cache_key) DO UPDATE SET
-                        response=excluded.response,
-                        updated_at=excluded.updated_at,
-                        query_name=excluded.query_name
-                    """,
-                    (cache_key, query_name, query, self._serialize_variables(variables), payload, timestamp),
-                )
-                conn.commit()
+        try:
+            with self._lock:
+                with self._connect() as conn:
+                    conn.execute(
+                        """
+                        INSERT INTO graphql_cache(cache_key, query_name, query, variables, response, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(cache_key) DO UPDATE SET
+                            response=excluded.response,
+                            updated_at=excluded.updated_at,
+                            query_name=excluded.query_name
+                        """,
+                        (cache_key, query_name, query, self._serialize_variables(variables), payload, timestamp),
+                    )
+                    conn.commit()
+        except (OSError, sqlite3.Error) as e:
+            self.logger.debug("Cache write failed, continuing: %s", e)
 
     def clear(self) -> None:
         """Remove all cached entries."""
         if self.ttl_seconds <= 0:
             return
 
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute("DELETE FROM graphql_cache")
-                conn.commit()
+        try:
+            with self._lock:
+                with self._connect() as conn:
+                    conn.execute("DELETE FROM graphql_cache")
+                    conn.commit()
+        except (OSError, sqlite3.Error) as e:
+            self.logger.debug("Cache clear failed: %s", e)
 
     @staticmethod
     def _serialize_variables(variables: dict[str, Any]) -> str:

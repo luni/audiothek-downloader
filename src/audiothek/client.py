@@ -2,9 +2,11 @@
 
 import json
 import logging
+import os
 import re
 import threading
 import time
+from collections.abc import Iterator
 from typing import Any
 from urllib.parse import urlparse
 
@@ -100,7 +102,10 @@ class AudiothekClient:
             )
             response.raise_for_status()
             data = response.json()
-            self._cache.set(query, variables, data, query_name)
+            # Responses carrying GraphQL errors are not cached: a transient
+            # failure would otherwise be replayed as "not found" for the TTL.
+            if not (isinstance(data, dict) and data.get("errors")):
+                self._cache.set(query, variables, data, query_name)
             return data
         except requests.RequestException as e:
             error_msg = f"GraphQL request failed: {str(e)}"
@@ -141,34 +146,77 @@ class AudiothekClient:
             self.logger.error(error_msg)
             raise DownloadError(url, None, error_msg) from e
 
-    def _fetch_and_validate_audio(self, url: str) -> bytes | None:
-        """Fetch audio content and validate it's not an error response.
+    @staticmethod
+    def _iter_response_chunks(response: requests.Response, chunk_size: int) -> Iterator[bytes]:
+        """Yield response body chunks, falling back to a preloaded body."""
+        if hasattr(response, "iter_content"):
+            yield from response.iter_content(chunk_size=chunk_size)
+        else:
+            content = getattr(response, "content", None)
+            if content:
+                yield content
+
+    @staticmethod
+    def _remove_partial_file(path: str) -> None:
+        """Best-effort removal of a partially downloaded file."""
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    def _stream_audio_to_file(self, url: str, file_path: str) -> bool:
+        """Stream audio content from URL to file with validation.
+
+        Content is written to a ``.part`` file and atomically renamed on
+        success, so interrupted downloads never look like complete files.
 
         Args:
             url: The URL to fetch
+            file_path: Destination file path
 
         Returns:
-            The content bytes if valid audio, None if 404 or soft 404 (error text)
+            True if valid audio was saved, False if 404, empty, or a soft-404
+            (error text) response
 
         Raises:
-            DownloadError: For HTTP errors other than 404
+            DownloadError: For HTTP errors other than 404, or write failures
 
         """
         max_attempts = 3
-        response = None
+        part_path = f"{file_path}.part"
+        size = 0
+        head = bytearray()
+
         for attempt in range(1, max_attempts + 1):
+            size = 0
+            head.clear()
             try:
-                response = self._session.get(url, timeout=REQUEST_TIMEOUT)
-                response.raise_for_status()
+                response = self._session.get(url, timeout=REQUEST_TIMEOUT, stream=True)
+                try:
+                    response.raise_for_status()
+                    with open(part_path, "wb") as f:
+                        for chunk in self._iter_response_chunks(response, 64 * 1024):
+                            if not chunk:
+                                continue
+                            if len(head) < 1000:
+                                head.extend(chunk[: 1000 - len(head)])
+                            f.write(chunk)
+                            size += len(chunk)
+                finally:
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
                 break
             except requests.HTTPError as e:
+                self._remove_partial_file(part_path)
                 if e.response is not None and e.response.status_code == 404:
                     self.logger.warning("Audio file not found (404): %s", url)
-                    return None
+                    return False
                 self.logger.error("HTTP error downloading audio: %s - %s", url, e)
                 status_code = e.response.status_code if e.response is not None else None
                 raise DownloadError(url, status_code, str(e)) from e
             except requests.RequestException as e:
+                self._remove_partial_file(part_path)
                 is_retryable = self._is_incomplete_read_error(e)
                 if is_retryable and attempt < max_attempts:
                     backoff_seconds = 0.5 * attempt
@@ -182,23 +230,34 @@ class AudiothekClient:
                     time.sleep(backoff_seconds)
                     continue
                 raise DownloadError(url, None, str(e)) from e
+            except OSError as e:
+                self._remove_partial_file(part_path)
+                error_msg = f"Failed to write to {part_path}: {str(e)}"
+                self.logger.error(error_msg)
+                raise DownloadError(url, None, error_msg) from e
+            except Exception:
+                self._remove_partial_file(part_path)
+                raise
 
-        if response is None:
-            return None
-
-        content = response.content
-        if not content:
+        if size == 0:
             self.logger.warning("Audio file returned empty response: %s", url)
-            return None
+            self._remove_partial_file(part_path)
+            return False
 
         # Check if content is likely an error response rather than audio
-        if len(content) < 1000:  # Very small files are likely error responses
-            content_text = content.decode("utf-8", errors="ignore").lower()
+        if size < 1000:  # Very small files are likely error responses
+            content_text = bytes(head).decode("utf-8", errors="ignore").lower()
             if any(error_indicator in content_text for error_indicator in ["not found", "error", "deleted", "removed", "unavailable", "404"]):
                 self.logger.warning("Audio file appears to be unavailable (error response): %s - Content: %s", url, content_text[:100])
-                return None
+                self._remove_partial_file(part_path)
+                return False
 
-        return content
+        try:
+            os.replace(part_path, file_path)
+        except OSError:
+            self._remove_partial_file(part_path)
+            raise
+        return True
 
     def _download_audio_to_file(
         self,
@@ -206,7 +265,7 @@ class AudiothekClient:
         file_path: str,
         fallback_url: str | None = None,
         fallback_urls: list[str] | None = None,
-    ) -> bool:
+    ) -> str | None:
         """Download audio content from URL to file with validation.
 
         Args:
@@ -216,7 +275,7 @@ class AudiothekClient:
             fallback_urls: Optional list of additional fallback URLs to try in order
 
         Returns:
-            True if download was successful, False if file was not found or invalid
+            The URL that served the content, or None if every candidate failed
 
         """
         ordered_urls: list[str] = [url]
@@ -224,42 +283,26 @@ class AudiothekClient:
             if candidate and candidate not in ordered_urls:
                 ordered_urls.append(candidate)
 
-        content: bytes | None = None
-        successful_url: str | None = None
-
         for index, candidate_url in enumerate(ordered_urls):
+            label = "primary URL" if index == 0 else "fallback URL"
             if index > 0:
                 self.logger.info("Trying fallback URL: %s", candidate_url)
             try:
-                content = self._fetch_and_validate_audio(candidate_url)
-                if content is None:
+                if self._stream_audio_to_file(candidate_url, file_path):
                     if index > 0:
-                        self.logger.warning("Fallback URL also appears to be unavailable: %s", candidate_url)
-                    continue
-                successful_url = candidate_url
-                break
+                        self.logger.info("Successfully downloaded from fallback URL: %s", candidate_url)
+                    return candidate_url
+                if index > 0:
+                    self.logger.warning("Fallback URL also appears to be unavailable: %s", candidate_url)
             except DownloadError as e:
                 if index == len(ordered_urls) - 1:
                     self.logger.error("Error downloading audio from %s: %s", candidate_url, e)
                 else:
-                    self.logger.error("Error downloading fallback audio: %s - %s", candidate_url, e)
+                    self.logger.error("Error downloading %s: %s - %s", label, candidate_url, e)
             except Exception as e:
                 self.logger.error("Unexpected error downloading audio from %s: %s", candidate_url, e)
 
-        if content is None or successful_url is None:
-            return False
-
-        if successful_url != url:
-            self.logger.info("Successfully downloaded from fallback URL: %s", successful_url)
-
-        # Save the valid audio content
-        try:
-            with open(file_path, "wb") as f:
-                f.write(content)
-            return True
-        except OSError as e:
-            self.logger.error("Failed to write audio file: %s - %s", file_path, e)
-            return False
+        return None
 
     def _get_content_length(self, url: str) -> int | None:
         """Get content length from URL using HEAD request.
@@ -372,9 +415,12 @@ class AudiothekClient:
             except ValueError:
                 duration = None
 
+        raw_id = node.get("id")
+        raw_title = node.get("title")
+
         return EpisodeMetadata(
-            id=str(node.get("id", "")),
-            title=node.get("title", ""),
+            id=str(raw_id) if raw_id is not None else "",
+            title=str(raw_title) if raw_title is not None else "",
             description=node.get("description"),
             summary=node.get("summary"),
             duration=duration,
@@ -606,7 +652,7 @@ class AudiothekClient:
             if not page_info.get("hasNextPage"):
                 break
 
-            offset += count
+            offset += len(page_nodes)
 
         return nodes
 
@@ -659,7 +705,7 @@ class AudiothekClient:
             if not page_info.get("hasNextPage"):
                 break
 
-            offset += count
+            offset += len(page_nodes)
 
         return nodes, collection_data or {}
 
@@ -703,7 +749,7 @@ class AudiothekClient:
             if not page_info.get("hasNextPage"):
                 break
 
-            offset += count
+            offset += len(page_nodes)
 
         return nodes
 

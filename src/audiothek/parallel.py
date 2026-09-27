@@ -46,10 +46,11 @@ def parallel_process(
             try:
                 success, result, exception = future.result()
                 indexed_results[index] = (success, result, exception)
-                if success:
+                if success and result:
                     logger.debug("Successfully processed item %s of %s", index + 1, len(items))
                 else:
-                    logger.warning("Failed to process item %s of %s: %s", index + 1, len(items), exception)
+                    detail = exception if exception is not None else "processing returned no result"
+                    logger.warning("Failed to process item %s of %s: %s", index + 1, len(items), detail)
             except Exception as e:
                 logger.error("Error getting result for item %s: %s", index + 1, e)
                 indexed_results[index] = (False, None, e)

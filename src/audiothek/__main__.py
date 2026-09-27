@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 
 from audiothek import AudiothekDownloader
-from audiothek.utils import migrate_folders
+from audiothek.utils import cleanup_files, migrate_folders, rename_files
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -18,6 +18,8 @@ class DownloadRequest:
     id: str = ""
     update_folders: bool = False
     migrate_folders_flag: bool = False
+    rename_flag: bool = False
+    cleanup_flag: bool = False
     remove_lower_quality: bool = False
     dry_run: bool = False
     editorial_category_id: str = ""
@@ -62,6 +64,16 @@ def main() -> int:
         help="Migrate existing folders to new naming schema (ID + Title)",
     )
     group.add_argument(
+        "--rename",
+        action="store_true",
+        help="Rename existing files and folders to the current naming scheme so downloads are recognized instead of re-fetched",
+    )
+    group.add_argument(
+        "--cleanup",
+        action="store_true",
+        help="Delete dead artifacts (stale locks, partial downloads) from the output folder",
+    )
+    group.add_argument(
         "--remove-lower-quality",
         action="store_true",
         help="Remove lower quality files (MP3 128kbit) when higher quality (MP4/AAC >=96kbit) exists",
@@ -101,7 +113,7 @@ def main() -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be removed without actually deleting files (use with --remove-lower-quality)",
+        help="Show what would change without modifying files (use with --remove-lower-quality, --rename, or --cleanup)",
     )
 
     args = parser.parse_args()
@@ -112,6 +124,8 @@ def main() -> int:
             id=args.id,
             update_folders=args.update_folders,
             migrate_folders_flag=args.migrate_folders,
+            rename_flag=args.rename,
+            cleanup_flag=args.cleanup,
             remove_lower_quality=args.remove_lower_quality,
             dry_run=args.dry_run,
             editorial_category_id=args.editorial_category_id,
@@ -143,6 +157,12 @@ def _process_request(request: DownloadRequest) -> int:
 
     if request.migrate_folders_flag:
         return 0 if migrate_folders(request.folder, downloader, downloader.logger) else 1
+
+    if request.rename_flag:
+        return 0 if rename_files(request.folder, downloader.logger, dry_run=request.dry_run) else 1
+
+    if request.cleanup_flag:
+        return 0 if cleanup_files(request.folder, downloader.logger, dry_run=request.dry_run) else 1
 
     if request.update_folders:
         result = downloader.update_all_folders(request.folder)
